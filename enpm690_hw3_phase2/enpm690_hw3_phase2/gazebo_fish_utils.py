@@ -26,8 +26,25 @@ def make_get_entities_request() -> GetEntities.Request:
 def make_spawn_entity_request(entity_name: str, model_path: Path, x: float, y: float, z: float = 0.15) -> SpawnEntity.Request:
     request = SpawnEntity.Request()
     request.name = entity_name
-    request.allow_renaming = False
-    request.entity_resource = Resource(uri=model_path.as_uri(), resource_string=model_path.read_text())
+    if hasattr(request, "allow_renaming"):
+        request.allow_renaming = False
+
+    resource = Resource(uri=model_path.as_uri(), resource_string=model_path.read_text())
+    if hasattr(request, "entity_resource"):
+        request.entity_resource = resource
+    elif hasattr(request, "resource"):
+        request.resource = resource
+    elif hasattr(request, "uri"):
+        request.uri = model_path.as_uri()
+    else:
+        raise AttributeError(
+            "SpawnEntity request does not expose a supported resource field. "
+            "Expected one of: entity_resource, resource, uri."
+        )
+
+    if hasattr(request, "entity_namespace"):
+        request.entity_namespace = ""
+
     request.initial_pose.header.frame_id = "world"
     request.initial_pose.pose.position.x = x
     request.initial_pose.pose.position.y = y
