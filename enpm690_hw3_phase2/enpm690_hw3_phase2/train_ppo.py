@@ -59,13 +59,21 @@ def main() -> None:
             env = SharkHuntLogicalEnv()
             env_name = "logical"
         else:
-            env = GazeboSharkHuntEnv(
-                launch_stack=args.launch_stack,
-                stack_timeout=args.stack_timeout,
-                headless=args.headless,
-                enable_fish_visuals=False,
-                command_topic="/cmd_vel",
-            )
+            try:
+                env = GazeboSharkHuntEnv(
+                    launch_stack=args.launch_stack,
+                    stack_timeout=args.stack_timeout,
+                    headless=args.headless,
+                    enable_fish_visuals=False,
+                    command_topic="/cmd_vel",
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    "Failed to initialize GazeboSharkHuntEnv. "
+                    "If diagnostics show /odom updating but /scan not updating, try "
+                    "`python -m enpm690_hw3_phase2.train_ppo --launch-stack --no-headless ...` "
+                    "to confirm a headless lidar/rendering issue."
+                ) from exc
             env_name = "gazebo"
         check_env(env, warn=True)
         _run_random_smoke(env)

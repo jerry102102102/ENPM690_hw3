@@ -148,6 +148,11 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
         self._wait_for_stack_ready()
         self._set_paused_state()
         self._ensure_fish_entities()
+        self._log_debug(
+            "env initialized "
+            f"launch_stack={self.launch_stack} headless={self.headless} "
+            f"command_topic={self.command_topic} robot_name={self.robot_name}"
+        )
 
     def reset(self, *, seed: int | None = None, options: dict | None = None) -> tuple[np.ndarray, dict]:
         super().reset(seed=seed)
@@ -253,6 +258,9 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
 
     def _launch_stack_process(self) -> subprocess.Popen[str]:
         launch_file = "phase2_train.launch.py" if self.headless else "phase2_eval.launch.py"
+        self._log_debug(
+            f"launching Gazebo stack launch_file={launch_file} launch_log_mode={self.launch_log_mode}"
+        )
         stdout_target: int | TextIO
         stderr_target: int | TextIO
         if self.launch_log_mode == "inherit":
@@ -288,19 +296,25 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
             remaining = max(0.1, deadline - time.time())
             if not client.wait_for_service(timeout_sec=remaining):
                 raise RuntimeError(f"Required Gazebo simulation service not ready: {client.srv_name}")
+        self._log_debug("all required Gazebo services are available")
 
         while time.time() < deadline:
             if self.node.latest_scan is not None and self.node.latest_odom is not None:
                 self._call_service(self.node.get_sim_state_client, GetSimulationState.Request(), timeout_sec=5.0)
                 if self._command_topic_has_subscriber():
+                    self._log_debug(self._sensor_diagnostics(prefix="stack_ready"))
                     return
             time.sleep(0.1)
         if self.node.latest_scan is None or self.node.latest_odom is None:
-            raise RuntimeError("Gazebo training stack is not ready: missing /scan or /odom.")
+            raise RuntimeError(
+                "Gazebo training stack is not ready: missing /scan or /odom. "
+                + self._sensor_diagnostics(prefix="stack_not_ready")
+            )
         raise RuntimeError(
             f"Gazebo training stack is ready for sensors/services, but the shark command topic "
             f"{self.command_topic} has no subscriber. Check whether training should publish to /cmd_vel "
-            f"or whether a command-gating node is missing."
+            f"or whether a command-gating node is missing. "
+            + self._sensor_diagnostics(prefix="cmd_subscriber_missing")
         )
 
     def _command_topic_has_subscriber(self) -> bool:
@@ -342,11 +356,39 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
             if stepped >= steps:
                 break
             time.sleep(0.01)
+        diagnostics = self._sensor_diagnostics(prefix="step_timeout")
+        likely_cause = ""
+        if self.node.odom_count > previous_odom_count and self.node.scan_count == previous_scan_count:
+            likely_cause = (
+                " Likely cause: /odom is updating but /scan is not, which usually means the lidar "
+                "sensor is not producing data in the current Gazebo stack. In this project that often "
+                "points to headless GPU lidar/rendering behavior rather than PPO or game-manager wiring."
+            )
         raise TimeoutError(
             "Timed out waiting for fresh /scan and /odom after stepping Gazebo. "
             f"stepped={stepped} scan_count={self.node.scan_count - previous_scan_count} "
-            f"odom_count={self.node.odom_count - previous_odom_count}"
+            f"odom_count={self.node.odom_count - previous_odom_count}. "
+            + diagnostics
+            + likely_cause
         )
+
+    def _sensor_diagnostics(self, prefix: str) -> str:
+        topic_names_and_types = dict(self.node.get_topic_names_and_types())
+        scan_present = "/scan" in topic_names_and_types
+        odom_present = "/odom" in topic_names_and_types
+        clock_present = "/clock" in topic_names_and_types
+        return (
+            f"[{prefix}] headless={self.headless} command_topic={self.command_topic} "
+            f"scan_present={scan_present} odom_present={odom_present} clock_present={clock_present} "
+            f"scan_count={self.node.scan_count} odom_count={self.node.odom_count} clock_count={self.node.clock_count} "
+            f"cmd_subscribers={self.node.count_subscribers(self.command_topic)} "
+            f"scan_publishers={self.node.count_publishers('/scan')} "
+            f"odom_publishers={self.node.count_publishers('/odom')} "
+            f"clock_publishers={self.node.count_publishers('/clock')}"
+        )
+
+    def _log_debug(self, message: str) -> None:
+        print(f"[gazebo_env] {message}", flush=True)
 
     def _update_shark_from_odom_into_game(self) -> None:
         odom = self.node.latest_odom
