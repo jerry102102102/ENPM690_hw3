@@ -117,7 +117,11 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
 
         self.dt = GAME_DT
         self.max_steps = int(GAME_DURATION_SECONDS / self.dt)
-        self.physics_steps_per_action = 10
+        # The robot publishes odom at 50 Hz and lidar at 10 Hz. Under stepped Gazebo
+        # training we need enough physics steps per action for both topics to publish
+        # at least one fresh message; small step counts can make training time out even
+        # though the exact same scene works in continuous play/auto mode.
+        self.physics_steps_per_action = 120
         self.rng = random.Random(690)
         self.game = GameCore(episode_duration=GAME_DURATION_SECONDS, dt=self.dt)
         self.game.fish_manager.rng = self.rng
@@ -326,16 +330,23 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
     def _step_and_wait(self, steps: int) -> None:
         previous_scan_count = self.node.scan_count
         previous_odom_count = self.node.odom_count
-        request = StepSimulation.Request()
-        request.steps = steps
-        self._call_service(self.node.step_client, request, timeout_sec=self.stack_timeout)
-
         deadline = time.time() + self.stack_timeout
+        stepped = 0
         while time.time() < deadline:
+            request = StepSimulation.Request()
+            request.steps = min(steps - stepped, 20)
+            self._call_service(self.node.step_client, request, timeout_sec=self.stack_timeout)
+            stepped += request.steps
             if self.node.scan_count > previous_scan_count and self.node.odom_count > previous_odom_count:
                 return
+            if stepped >= steps:
+                break
             time.sleep(0.01)
-        raise TimeoutError("Timed out waiting for fresh /scan and /odom after stepping Gazebo.")
+        raise TimeoutError(
+            "Timed out waiting for fresh /scan and /odom after stepping Gazebo. "
+            f"stepped={stepped} scan_count={self.node.scan_count - previous_scan_count} "
+            f"odom_count={self.node.odom_count - previous_odom_count}"
+        )
 
     def _update_shark_from_odom_into_game(self) -> None:
         odom = self.node.latest_odom
