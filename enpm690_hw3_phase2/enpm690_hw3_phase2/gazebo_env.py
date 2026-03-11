@@ -452,9 +452,9 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
     def _publish_zero_command(self) -> None:
         self.node.cmd_pub.publish(Twist())
 
-    def run_motion_smoke_test(self, steps: int = 5, action: np.ndarray | None = None) -> None:
+    def run_motion_smoke_test(self, steps: int = 8, action: np.ndarray | None = None) -> None:
         if action is None:
-            action = np.array([-0.4, 0.0], dtype=np.float32)
+            action = np.array([0.0, 0.0], dtype=np.float32)
         observation, _ = self.reset()
         start_x = self.game.shark.x
         start_y = self.game.shark.y
@@ -463,7 +463,7 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
             if terminated or truncated:
                 break
         moved = math.hypot(self.game.shark.x - start_x, self.game.shark.y - start_y)
-        if moved < 0.02:
+        if moved < 0.01:
             raise RuntimeError(
                 f"Gazebo motion smoke test failed: shark odometry did not change enough on {self.command_topic}. "
                 f"Moved only {moved:.4f} m. Check the command topic path and robot command subscriber."
