@@ -47,17 +47,17 @@ class SharkAutoController(Node):
         self.declare_parameter("k_center_push", 1.8)
         self.declare_parameter("control_hz", 10.0)
         self.declare_parameter("behavior_caution", 1.0)
-        self.declare_parameter("turn_in_place_proximity", 0.72)
+        self.declare_parameter("turn_in_place_distance", 0.32)
         self.declare_parameter("cruise_speed", 0.22)
         self.declare_parameter("max_speed_scale", 1.0)
         self.declare_parameter("target_lock_seconds", 0.9)
-        self.declare_parameter("avoid_enter_proximity", 0.56)
-        self.declare_parameter("avoid_exit_proximity", 0.30)
-        self.declare_parameter("side_clear_proximity", 0.36)
+        self.declare_parameter("avoid_enter_distance", 0.80)
+        self.declare_parameter("avoid_exit_distance", 0.95)
+        self.declare_parameter("side_clear_distance", 0.72)
         self.declare_parameter("avoid_commit_seconds", 0.9)
         self.declare_parameter("recover_seconds", 0.5)
         self.declare_parameter("avoid_turn_speed", 1.25)
-        self.declare_parameter("avoid_forward_speed", 0.10)
+        self.declare_parameter("avoid_forward_speed", 0.16)
         self.declare_parameter("recover_turn_speed", 0.55)
 
         self.cmd_topic = str(self.get_parameter("cmd_topic").value)
@@ -67,13 +67,13 @@ class SharkAutoController(Node):
         self.k_center_push = float(self.get_parameter("k_center_push").value)
         control_hz = float(self.get_parameter("control_hz").value)
         self.behavior_caution = float(self.get_parameter("behavior_caution").value)
-        self.turn_in_place_proximity = float(self.get_parameter("turn_in_place_proximity").value)
+        self.turn_in_place_distance = float(self.get_parameter("turn_in_place_distance").value)
         self.cruise_speed = float(self.get_parameter("cruise_speed").value)
         self.max_speed_scale = float(self.get_parameter("max_speed_scale").value)
         self.target_lock_seconds = float(self.get_parameter("target_lock_seconds").value)
-        self.avoid_enter_proximity = float(self.get_parameter("avoid_enter_proximity").value)
-        self.avoid_exit_proximity = float(self.get_parameter("avoid_exit_proximity").value)
-        self.side_clear_proximity = float(self.get_parameter("side_clear_proximity").value)
+        self.avoid_enter_distance = float(self.get_parameter("avoid_enter_distance").value)
+        self.avoid_exit_distance = float(self.get_parameter("avoid_exit_distance").value)
+        self.side_clear_distance = float(self.get_parameter("side_clear_distance").value)
         self.avoid_commit_seconds = float(self.get_parameter("avoid_commit_seconds").value)
         self.recover_seconds = float(self.get_parameter("recover_seconds").value)
         self.avoid_turn_speed = float(self.get_parameter("avoid_turn_speed").value)
@@ -216,7 +216,7 @@ class SharkAutoController(Node):
     ) -> Twist:
         cmd = Twist()
         cmd.angular.z = clamp(target_turn + 0.65 * reactive_turn, -SHARK_MAX_ANGULAR_SPEED, SHARK_MAX_ANGULAR_SPEED)
-        if sectors.center >= self._effective_turn_in_place_proximity():
+        if self._sector_distance(sectors.center) <= self._effective_turn_in_place_distance():
             cmd.linear.x = 0.0
             return cmd
 
@@ -233,12 +233,13 @@ class SharkAutoController(Node):
             -SHARK_MAX_ANGULAR_SPEED,
             SHARK_MAX_ANGULAR_SPEED,
         )
-        if sectors.center >= self._effective_turn_in_place_proximity():
+        center_distance = self._sector_distance(sectors.center)
+        if center_distance <= max(0.18, 0.7 * self._effective_turn_in_place_distance()):
             cmd.linear.x = 0.0
             return cmd
         cmd.linear.x = clamp(
-            self._effective_avoid_forward_speed() * (1.0 - 0.65 * sectors.center),
-            0.0,
+            self._effective_avoid_forward_speed() * clamp(center_distance / self._effective_avoid_enter_distance(), 0.35, 1.0),
+            0.04,
             self._effective_avoid_forward_speed(),
         )
         return cmd
@@ -265,11 +266,13 @@ class SharkAutoController(Node):
 
     def _update_mode(self, sectors: SectorProximities) -> None:
         now = self._now_seconds()
-        obstacle_strength = sectors.obstacle_strength
+        center_distance = self._sector_distance(sectors.center)
+        obstacle_distance = self._sector_distance(sectors.obstacle_strength)
+        side_distance = min(self._sector_distance(sectors.left), self._sector_distance(sectors.right))
         if self.mode == "avoid":
             if now >= self.avoid_until and (
-                sectors.center <= self._effective_avoid_exit_proximity()
-                and max(sectors.left, sectors.right) <= self._effective_side_clear_proximity()
+                center_distance >= self._effective_avoid_exit_distance()
+                and side_distance >= self._effective_side_clear_distance()
             ):
                 self.mode = "recover"
                 self.recover_until = now + self.recover_seconds
@@ -277,14 +280,14 @@ class SharkAutoController(Node):
             return
 
         if self.mode == "recover":
-            if obstacle_strength >= self._effective_avoid_enter_proximity():
+            if obstacle_distance <= self._effective_avoid_enter_distance():
                 self._enter_avoid_mode(sectors, now)
             elif now >= self.recover_until:
                 self.mode = "chase"
                 self.get_logger().info("[AUTO] mode transition: recover -> chase")
             return
 
-        if obstacle_strength >= self._effective_avoid_enter_proximity():
+        if obstacle_distance <= self._effective_avoid_enter_distance():
             self._enter_avoid_mode(sectors, now)
 
     def _enter_avoid_mode(self, sectors: SectorProximities, now: float) -> None:
@@ -341,21 +344,26 @@ class SharkAutoController(Node):
         scale = 1.05 - 0.35 * (caution - 1.0)
         return clamp(self.avoid_forward_speed * scale, 0.04, 0.20)
 
-    def _effective_turn_in_place_proximity(self) -> float:
+    def _effective_turn_in_place_distance(self) -> float:
         caution = self._effective_behavior_caution()
-        return clamp(self.turn_in_place_proximity - 0.14 * (caution - 1.0), 0.52, 0.80)
+        return clamp(self.turn_in_place_distance + 0.12 * (caution - 1.0), 0.22, 0.55)
 
-    def _effective_avoid_enter_proximity(self) -> float:
+    def _effective_avoid_enter_distance(self) -> float:
         caution = self._effective_behavior_caution()
-        return clamp(self.avoid_enter_proximity - 0.18 * (caution - 1.0), 0.34, 0.72)
+        return clamp(self.avoid_enter_distance + 0.25 * (caution - 1.0), 0.55, 1.20)
 
-    def _effective_avoid_exit_proximity(self) -> float:
+    def _effective_avoid_exit_distance(self) -> float:
         caution = self._effective_behavior_caution()
-        return clamp(self.avoid_exit_proximity - 0.08 * (caution - 1.0), 0.18, 0.40)
+        return clamp(self.avoid_exit_distance + 0.20 * (caution - 1.0), 0.70, 1.30)
 
-    def _effective_side_clear_proximity(self) -> float:
+    def _effective_side_clear_distance(self) -> float:
         caution = self._effective_behavior_caution()
-        return clamp(self.side_clear_proximity - 0.10 * (caution - 1.0), 0.20, 0.48)
+        return clamp(self.side_clear_distance + 0.16 * (caution - 1.0), 0.50, 1.10)
+
+    def _sector_distance(self, proximity: float) -> float:
+        if self.scan is None:
+            return float("inf")
+        return max(self.scan.range_min, (1.0 - proximity) * self.scan.range_max)
 
 
 def main() -> None:
