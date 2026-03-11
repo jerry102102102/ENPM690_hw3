@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 
 import numpy as np
@@ -29,6 +30,15 @@ def _run_scripted_smoke(env, steps: int = 20) -> None:
             observation, _ = env.reset()
 
 
+def _format_seconds(seconds: float) -> str:
+    total = max(0, int(seconds))
+    minutes, sec = divmod(total, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours > 0:
+        return f"{hours:d}h{minutes:02d}m{sec:02d}s"
+    return f"{minutes:02d}m{sec:02d}s"
+
+
 def main() -> None:
     log_python_runtime("train_ppo")
 
@@ -44,11 +54,49 @@ def main() -> None:
 
     try:
         from stable_baselines3 import PPO
+        from stable_baselines3.common.callbacks import BaseCallback
         from stable_baselines3.common.env_checker import check_env
     except ImportError as exc:
         raise SystemExit(
             "stable-baselines3 is required for training. Install it with `pip install stable-baselines3 gymnasium`."
         ) from exc
+
+    class ProgressCallback(BaseCallback):
+        def __init__(self, total_timesteps: int, report_interval_sec: float = 5.0) -> None:
+            super().__init__()
+            self.total_timesteps = max(1, total_timesteps)
+            self.report_interval_sec = report_interval_sec
+            self.start_time = 0.0
+            self.last_report_time = 0.0
+
+        def _on_training_start(self) -> None:
+            self.start_time = time.time()
+            self.last_report_time = self.start_time
+            print(
+                f"[train_ppo] training started total_timesteps={self.total_timesteps}",
+                flush=True,
+            )
+
+        def _on_step(self) -> bool:
+            now = time.time()
+            if now - self.last_report_time < self.report_interval_sec:
+                return True
+
+            elapsed = max(now - self.start_time, 1e-6)
+            done = self.num_timesteps
+            progress = min(100.0, 100.0 * done / self.total_timesteps)
+            steps_per_sec = done / elapsed
+            remaining = max(0, self.total_timesteps - done)
+            eta = remaining / max(steps_per_sec, 1e-6)
+            print(
+                "[train_ppo] progress "
+                f"timesteps={done}/{self.total_timesteps} "
+                f"({progress:.1f}%) elapsed={_format_seconds(elapsed)} "
+                f"eta={_format_seconds(eta)} fps={steps_per_sec:.1f}",
+                flush=True,
+            )
+            self.last_report_time = now
+            return True
 
     from .gazebo_env import GazeboSharkHuntEnv
     from .logical_env import SharkHuntLogicalEnv
@@ -59,6 +107,7 @@ def main() -> None:
         if args.use_logical_env:
             env = SharkHuntLogicalEnv()
             env_name = "logical"
+            print("[train_ppo] environment=logical", flush=True)
         else:
             try:
                 env = GazeboSharkHuntEnv(
@@ -76,6 +125,11 @@ def main() -> None:
                     "to confirm a headless lidar/rendering issue."
                 ) from exc
             env_name = "gazebo"
+            print(
+                f"[train_ppo] environment=gazebo visible={not args.headless} "
+                f"launch_stack={args.launch_stack} device={args.device}",
+                flush=True,
+            )
         check_env(env, warn=True)
         _run_random_smoke(env)
         _run_scripted_smoke(env)
@@ -89,7 +143,7 @@ def main() -> None:
             tensorboard_log=str(args.output_dir / "tensorboard"),
             device=args.device,
         )
-        model.learn(total_timesteps=args.timesteps)
+        model.learn(total_timesteps=args.timesteps, callback=ProgressCallback(args.timesteps))
         model.save(str(args.output_dir / "ppo_shark_hunt"))
 
         summary = {
