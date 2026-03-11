@@ -67,7 +67,15 @@ def generate_launch_description() -> LaunchDescription:
                 package="enpm690_hw3_phase2",
                 executable="game_manager",
                 output="screen",
-                parameters=[params, {"mode": "auto_play", "use_sim_time": True}],
+                parameters=[
+                    params,
+                    {
+                        "mode": "auto_play",
+                        "auto_reset": False,
+                        "episode_duration": 9999.0,
+                        "use_sim_time": True,
+                    },
+                ],
             ),
             Node(
                 package="enpm690_hw3_phase2",
@@ -94,7 +102,7 @@ def generate_launch_description() -> LaunchDescription:
                 executable="rviz2",
                 output="screen",
                 arguments=["-d", rviz_config],
-                parameters=[{"use_sim_time": True}],
+                parameters=[{"use_sim_time": False}],
             ),
         ]
     )
