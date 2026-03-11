@@ -136,30 +136,29 @@ The obstacle world is intentionally simple and deterministic:
 
 This is a debugging world for teleop and LiDAR verification, not a final autonomy benchmark map.
 
-## Phase 2 Python environment policy
+## Phase 2 summary
 
-Phase 2 mixes ROS 2 Python packages with ML dependencies such as `gymnasium` and `stable-baselines3`.
-This repo treats play/demo nodes and training/evaluation scripts differently on purpose:
+Phase 2 is now a minimal Pac-Man-style game built on top of the working Phase 1 stack.
 
-- ROS runtime nodes continue to use `ros2 launch` and `ros2 run`.
-- ML scripts use `python -m enpm690_hw3_phase2.train_ppo` and `python -m enpm690_hw3_phase2.eval_policy`.
-
-Why:
-
-- Ubuntu 24.04 and Python 3.12 enforce PEP 668 protections, so installing ML packages into the system Python is not the right workflow.
-- ROS 2 documentation recommends using a virtual environment for extra Python packages.
-- In binary-installed ROS 2 setups, `ros2 run` console entry scripts may still be generated with `/usr/bin/python3`, which bypasses the active project `.venv`.
-
-Recommended shell setup for every new terminal:
+Main commands:
 
 ```bash
-source /Users/jerrychuang/Desktop/2026_spring/robot_learning/ENPM690_hw3/scripts/dev_env.sh
+ros2 launch enpm690_hw3_phase2 phase2_play_teleop.launch.py
+ros2 launch enpm690_hw3_phase2 phase2_play_auto.launch.py
 ```
 
-That script activates `.venv`, sources `/opt/ros/jazzy`, and sources the workspace `install/setup.*`.
-After that, the official Phase 2 ML commands are:
+Teleop remains the same Phase 1 keyboard flow:
 
 ```bash
-python -m enpm690_hw3_phase2.train_ppo --launch-stack --timesteps 20000 --output-dir artifacts/phase2_ppo
-python -m enpm690_hw3_phase2.eval_policy --launch-stack --headless --model artifacts/phase2_ppo/ppo_shark_hunt.zip --episodes 3
+ros2 run enpm690_hw3_phase1 keyboard_teleop
 ```
+
+Phase 2 adds:
+
+- fixed pellets
+- one simple waypoint ghost
+- score and timer topics
+- RViz marker visualization
+- one LiDAR-based rule controller for auto play
+
+See [enpm690_hw3_phase2/README_phase2.md](enpm690_hw3_phase2/README_phase2.md) for the full Phase 2 usage guide.

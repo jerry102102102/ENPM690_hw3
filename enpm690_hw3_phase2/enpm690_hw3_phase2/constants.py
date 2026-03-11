@@ -133,6 +133,36 @@ PACMAN_OBJECT_LAYOUT: tuple[tuple[str, str, float, float], ...] = (
 )
 
 DEFAULT_SHARK_SPAWN = (0.0, 0.0, 0.0)
+PACMAN_WORLD_BOUNDS = WorldBounds(x_min=-6.7, x_max=6.7, y_min=-6.7, y_max=6.7)
+PACMAN_PELLET_RADIUS = 0.12
+PACMAN_PELLET_SCORE = 1
+PACMAN_GHOST_RADIUS = 0.22
+PACMAN_GHOST_SPEED = 0.35
+PACMAN_TIME_LIMIT = 30.0
+PACMAN_PELLET_LAYOUT: tuple[tuple[str, float, float], ...] = (
+    ("pellet_0", -5.4, 0.0),
+    ("pellet_1", -4.2, 0.0),
+    ("pellet_2", -3.0, 0.0),
+    ("pellet_3", -1.8, 0.0),
+    ("pellet_4", -0.6, 0.0),
+    ("pellet_5", 0.6, 0.0),
+    ("pellet_6", 3.2, 0.0),
+    ("pellet_7", 4.6, 0.0),
+    ("pellet_8", -4.8, 4.8),
+    ("pellet_9", -2.0, 4.8),
+    ("pellet_10", 0.8, 4.8),
+    ("pellet_11", 4.6, 4.8),
+    ("pellet_12", -4.8, -4.8),
+    ("pellet_13", -2.0, -4.8),
+    ("pellet_14", 0.8, -4.8),
+    ("pellet_15", 4.6, -4.8),
+)
+PACMAN_GHOST_WAYPOINTS: tuple[tuple[float, float], ...] = (
+    (-4.6, 2.0),
+    (-1.0, 2.0),
+    (-1.0, -2.8),
+    (-4.6, -2.8),
+)
 
 
 @dataclass
@@ -170,6 +200,49 @@ class CatchEvent:
     fish_id: str
     species: str
     score_delta: int
+
+
+@dataclass
+class PelletState:
+    pellet_id: str
+    x: float
+    y: float
+    active: bool = True
+    value: int = PACMAN_PELLET_SCORE
+    radius: float = PACMAN_PELLET_RADIUS
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class GhostState:
+    ghost_id: str
+    x: float
+    y: float
+    heading: float
+    speed: float
+    radius: float
+    waypoint_index: int = 0
+    active: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class PacmanGameSnapshot:
+    mode: str
+    score: int
+    time_remaining: float
+    pellets_remaining: int
+    game_over: bool = False
+    victory: bool = False
+    sync_ready: bool = False
+    collision_cooldown: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass

@@ -1,124 +1,97 @@
 # ENPM690 Homework 3 Phase 2
 
-This package adds the Phase 2 shark-hunt scenario on top of the working Phase 1 stack.
+Phase 2 is now a minimal Pac-Man-style game built directly on top of the working Phase 1 stack.
 
-## What Phase 2 adds
+## Design goals
 
-- 30 second shark-vs-fish game loop
-- rule-based tuna, sardine, and seaweed management
-- score, timer, catch, respawn, and stun handling
-- baseline autonomous shark controller
-- RViz marker visualization for fish and HUD text
-- Gymnasium-compatible shark hunting environment
-- PPO training and evaluation scripts
-- Gazebo-backed training environment for the default RL path
+- reuse the existing Phase 1 Gazebo + RViz + ROS 2 stack
+- keep keyboard teleop unchanged
+- keep LiDAR, odometry, TF, and `/cmd_vel` flow simple
+- use RViz markers for game visualization
+- avoid complex fish / shark / RL orchestration in the main path
 
-## Package layout
+## Game rules
 
-- `launch/`: teleop play, auto play, training, evaluation, and demo launch files
-- `config/`: runtime parameters and RL defaults
-- `worlds/`: Phase 2 ocean-themed arena
-- `models/`: simple fish visuals
-- `enpm690_hw3_phase2/`: game logic, ROS nodes, and RL code
+- the TurtleBot3-like robot is Pac-Man
+- pellets are fixed 2D points
+- one ghost moves on a simple waypoint loop
+- touching a pellet gives `+1`
+- touching the ghost ends the game
+- time limit is `30s`
+- collecting all pellets is a victory
 
-## Main topics
+## Runtime topics
 
 - `/phase2/score`
 - `/phase2/time_remaining`
-- `/phase2/mode`
-- `/phase2/catch_event`
-- `/phase2/fish_state_json`
 - `/phase2/game_state_json`
+- `/phase2/pellet_state_json`
+- `/phase2/ghost_state_json`
 - `/phase2/markers`
-- `/cmd_vel_input`
-- `/cmd_vel`
 
-## Teleop play mode
+## Teleop play
 
-Bring up the environment:
+Terminal 1:
 
 ```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
 ros2 launch enpm690_hw3_phase2 phase2_play_teleop.launch.py
 ```
 
-Run keyboard teleop in a second terminal and remap it into the gated input topic:
+Terminal 2:
 
 ```bash
-ros2 run enpm690_hw3_phase1 keyboard_teleop --ros-args -r /cmd_vel:=/cmd_vel_input
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 run enpm690_hw3_phase1 keyboard_teleop
 ```
 
-## Autonomous baseline mode
+This launch reuses the full Phase 1 bringup and adds:
+
+- `pacman_game_manager`
+- `marker_publisher`
+
+## Autonomous play
 
 ```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
 ros2 launch enpm690_hw3_phase2 phase2_play_auto.launch.py
 ```
 
-The autonomous controller exposes one report-friendly tunable parameter:
+The baseline controller:
 
-- `behavior_caution`
-  - lower values make the shark more aggressive, faster, and willing to pass closer to obstacles
-  - higher values make it slow down earlier and enter obstacle avoidance sooner
+- picks the nearest active pellet
+- uses LiDAR sector values for obstacle avoidance
+- adds a simple ghost avoidance term when the ghost is close
 
-Example runs for comparison:
-
-```bash
-ros2 launch enpm690_hw3_phase2 phase2_play_auto.launch.py behavior_caution:=0.8
-ros2 launch enpm690_hw3_phase2 phase2_play_auto.launch.py behavior_caution:=1.0
-ros2 launch enpm690_hw3_phase2 phase2_play_auto.launch.py behavior_caution:=1.3
-```
-
-## Training
-
-Default training now uses the Gazebo-backed environment.
-The old Python-only environment remains available only as a debug fallback.
-Use a project virtual environment for ML dependencies and run the training/evaluation entry points with
-`python -m ...`, not `ros2 run`.
-The play/auto `game_manager` path and the training env now share the same core episode state, fish, catch, target, and stun logic.
-
-Why this repo does that:
-
-- Ubuntu 24.04 / Python 3.12 uses PEP 668 protections, so installing third-party ML packages into the system Python is the wrong path.
-- ROS 2 documentation recommends virtual environments for extra Python dependencies.
-- In binary-installed ROS 2 setups, `ros2 run` can still execute Python console entry scripts with `/usr/bin/python3` instead of the active `.venv` interpreter.
-- `python -m enpm690_hw3_phase2.train_ppo` and `python -m enpm690_hw3_phase2.eval_policy` reliably use the currently active virtualenv interpreter.
-
-Install Python RL dependencies first:
+Useful tuning arguments:
 
 ```bash
-source scripts/dev_env.sh
-python -m pip install gymnasium stable-baselines3
+ros2 launch enpm690_hw3_phase2 phase2_play_auto.launch.py \
+  forward_speed:=0.28 \
+  turn_gain:=1.7 \
+  ghost_avoid_gain:=1.6
 ```
 
-Train:
+## Train skeleton
 
-```bash
-python -m enpm690_hw3_phase2.train_ppo --launch-stack --timesteps 20000 --output-dir artifacts/phase2_ppo
-```
+`phase2_train.launch.py` is only a lightweight scaffold now.
+It is not the main deliverable.
 
-Training defaults are tuned for easier debugging:
+## Package structure
 
-- visible Gazebo stack by default
-- `--device cpu` by default for PPO with `MlpPolicy`
-- Gazebo training reuses the most recent lidar scan when odometry is fresh but lidar publishes more slowly than the stepped RL loop
+- `launch/`: teleop, auto, and train-skeleton launches
+- `config/phase2_params.yaml`: game and controller parameters
+- `rviz/phase2_pacman.rviz`: RViz profile with markers
+- `enpm690_hw3_phase2/pacman_game_manager.py`: game rules
+- `enpm690_hw3_phase2/pellet_manager.py`: fixed pellets
+- `enpm690_hw3_phase2/ghost_manager.py`: simple ghost waypoint motion
+- `enpm690_hw3_phase2/pacman_auto_controller.py`: baseline autonomy
+- `enpm690_hw3_phase2/marker_publisher.py`: RViz markers and HUD
 
-Evaluate:
+## Legacy
 
-```bash
-python -m enpm690_hw3_phase2.eval_policy --launch-stack --headless --model artifacts/phase2_ppo/ppo_shark_hunt.zip --episodes 5
-```
-
-Both scripts print startup diagnostics for:
-
-- `sys.executable`
-- `sys.version`
-- `gymnasium` import status
-- `stable_baselines3` import status
-
-The ROS runtime nodes remain standard ROS executables:
-
-- `ros2 launch enpm690_hw3_phase2 phase2_play_teleop.launch.py`
-- `ros2 launch enpm690_hw3_phase2 phase2_play_auto.launch.py`
-- `ros2 run enpm690_hw3_phase2 game_manager`
-- `ros2 run enpm690_hw3_phase2 gazebo_fish_sync`
-- `ros2 run enpm690_hw3_phase2 marker_publisher`
-- `ros2 run enpm690_hw3_phase2 shark_auto_controller`
+Older shark / fish / RL-heavy files remain only as legacy reference.
+They are not used by the active launch files or console entry points.

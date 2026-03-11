@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import json
+import math
+
+import rclpy
+from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
+from rclpy.node import Node
+from sensor_msgs.msg import LaserScan
+from std_msgs.msg import String
+
+from .constants import LIDAR_BIN_COUNT, SHARK_MAX_ANGULAR_SPEED, SHARK_MAX_LINEAR_SPEED
+from .geometry_utils import angle_diff, bearing_xy, clamp, distance_xy
+from .observation_builder import ObservationBuilder
+
+
+def yaw_from_quaternion(x: float, y: float, z: float, w: float) -> float:
+    siny_cosp = 2.0 * (w * z + x * y)
+    cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+    return math.atan2(siny_cosp, cosy_cosp)
+
+
+class PacmanAutoController(Node):
+    def __init__(self) -> None:
+        super().__init__("pacman_auto_controller")
+        self.declare_parameter("cmd_topic", "/cmd_vel")
+        self.declare_parameter("control_hz", 10.0)
+        self.declare_parameter("forward_speed", 0.28)
+        self.declare_parameter("turn_gain", 1.7)
+        self.declare_parameter("ghost_avoid_gain", 1.6)
+        self.declare_parameter("ghost_avoid_distance", 1.2)
+        self.declare_parameter("wall_avoid_gain", 1.2)
+        self.declare_parameter("wall_stop_distance", 0.28)
+        self.declare_parameter("wall_slow_distance", 0.85)
+
+        self.cmd_topic = str(self.get_parameter("cmd_topic").value)
+        self.forward_speed = float(self.get_parameter("forward_speed").value)
+        self.turn_gain = float(self.get_parameter("turn_gain").value)
+        self.ghost_avoid_gain = float(self.get_parameter("ghost_avoid_gain").value)
+        self.ghost_avoid_distance = float(self.get_parameter("ghost_avoid_distance").value)
+        self.wall_avoid_gain = float(self.get_parameter("wall_avoid_gain").value)
+        self.wall_stop_distance = float(self.get_parameter("wall_stop_distance").value)
+        self.wall_slow_distance = float(self.get_parameter("wall_slow_distance").value)
+        control_hz = float(self.get_parameter("control_hz").value)
+
+        self.robot_x = 0.0
+        self.robot_y = 0.0
+        self.robot_heading = 0.0
+        self.scan: LaserScan | None = None
+        self.pellet_payload = "[]"
+        self.ghost_payload = "{}"
+        self.game_payload = "{}"
+        self.last_log_time = self.get_clock().now()
+
+        self.cmd_pub = self.create_publisher(Twist, self.cmd_topic, 10)
+        self.create_subscription(Odometry, "/odom", self._odom_callback, 20)
+        self.create_subscription(LaserScan, "/scan", self._scan_callback, 10)
+        self.create_subscription(String, "/phase2/pellet_state_json", self._pellet_callback, 10)
+        self.create_subscription(String, "/phase2/ghost_state_json", self._ghost_callback, 10)
+        self.create_subscription(String, "/phase2/game_state_json", self._game_callback, 10)
+        self.create_timer(1.0 / control_hz, self._tick)
+
+    def _odom_callback(self, msg: Odometry) -> None:
+        self.robot_x = msg.pose.pose.position.x
+        self.robot_y = msg.pose.pose.position.y
+        self.robot_heading = yaw_from_quaternion(
+            msg.pose.pose.orientation.x,
+            msg.pose.pose.orientation.y,
+            msg.pose.pose.orientation.z,
+            msg.pose.pose.orientation.w,
+        )
+
+    def _scan_callback(self, msg: LaserScan) -> None:
+        self.scan = msg
+
+    def _pellet_callback(self, msg: String) -> None:
+        self.pellet_payload = msg.data
+
+    def _ghost_callback(self, msg: String) -> None:
+        self.ghost_payload = msg.data
+
+    def _game_callback(self, msg: String) -> None:
+        self.game_payload = msg.data
+
+    def _tick(self) -> None:
+        if self.scan is None:
+            return
+
+        game = json.loads(self.game_payload or "{}")
+        if game.get("game_over", False) or game.get("victory", False):
+            self.cmd_pub.publish(Twist())
+            return
+
+        pellets = [pellet for pellet in json.loads(self.pellet_payload or "[]") if pellet.get("active", False)]
+        if not pellets:
+            self.cmd_pub.publish(Twist())
+            return
+
+        target = min(pellets, key=lambda pellet: distance_xy(self.robot_x, self.robot_y, pellet["x"], pellet["y"]))
+        target_bearing = angle_diff(
+            bearing_xy(self.robot_x, self.robot_y, float(target["x"]), float(target["y"])),
+            self.robot_heading,
+        )
+
+        ghost = json.loads(self.ghost_payload or "{}")
+        ghost_turn = 0.0
+        if ghost:
+            ghost_distance = distance_xy(self.robot_x, self.robot_y, float(ghost.get("x", 0.0)), float(ghost.get("y", 0.0)))
+            if ghost_distance < self.ghost_avoid_distance:
+                ghost_bearing = angle_diff(
+                    bearing_xy(self.robot_x, self.robot_y, float(ghost.get("x", 0.0)), float(ghost.get("y", 0.0))),
+                    self.robot_heading,
+                )
+                ghost_turn = -self.ghost_avoid_gain * ghost_bearing
+
+        lidar = ObservationBuilder.preprocess_scan_ranges(
+            self.scan.ranges,
+            self.scan.range_min,
+            self.scan.range_max,
+            LIDAR_BIN_COUNT,
+        )
+        left = self._slice_max(lidar, len(lidar) // 2 + 1, len(lidar) // 2 + 4)
+        center = self._slice_max(lidar, len(lidar) // 2 - 1, len(lidar) // 2 + 2)
+        right = self._slice_max(lidar, len(lidar) // 2 - 4, len(lidar) // 2 - 1)
+        wall_turn = self.wall_avoid_gain * (right - left)
+        front_distance = max(self.scan.range_min, (1.0 - center) * self.scan.range_max)
+
+        cmd = Twist()
+        cmd.angular.z = clamp(
+            self.turn_gain * target_bearing + wall_turn + ghost_turn,
+            -SHARK_MAX_ANGULAR_SPEED,
+            SHARK_MAX_ANGULAR_SPEED,
+        )
+        if front_distance <= self.wall_stop_distance:
+            cmd.linear.x = 0.0
+            cmd.angular.z = clamp(cmd.angular.z + (1.0 if wall_turn >= 0.0 else -1.0), -SHARK_MAX_ANGULAR_SPEED, SHARK_MAX_ANGULAR_SPEED)
+        else:
+            heading_scale = clamp(1.0 - 0.45 * abs(target_bearing), 0.25, 1.0)
+            clearance_scale = clamp(front_distance / self.wall_slow_distance, 0.35, 1.0)
+            cmd.linear.x = clamp(self.forward_speed * heading_scale * clearance_scale, 0.0, SHARK_MAX_LINEAR_SPEED)
+
+        self._log_status(target, cmd)
+        self.cmd_pub.publish(cmd)
+
+    def _slice_max(self, lidar: list[float], start: int, end: int) -> float:
+        values = lidar[max(0, start) : min(len(lidar), end)]
+        if not values:
+            return 0.0
+        return float(max(values))
+
+    def _log_status(self, target: dict, cmd: Twist) -> None:
+        now = self.get_clock().now()
+        if (now - self.last_log_time).nanoseconds / 1e9 < 1.0:
+            return
+        distance = distance_xy(self.robot_x, self.robot_y, float(target["x"]), float(target["y"]))
+        self.get_logger().info(
+            f"[AUTO] target={target['pellet_id']} dist={distance:.2f} v={cmd.linear.x:.2f} w={cmd.angular.z:.2f}"
+        )
+        self.last_log_time = now
+
+
+def main() -> None:
+    rclpy.init()
+    node = PacmanAutoController()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()

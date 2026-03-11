@@ -27,15 +27,14 @@ setup(
     zip_safe=True,
     maintainer="ENPM690 Student",
     maintainer_email="student@example.com",
-    description="Phase 2 shark hunt scenario, rule-based baseline, and Gymnasium environment.",
+    description="Phase 2 Pac-Man style game built on top of the Phase 1 Gazebo and ROS 2 stack.",
     license="Apache-2.0",
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
-            "game_manager = enpm690_hw3_phase2.game_manager:main",
-            "gazebo_fish_sync = enpm690_hw3_phase2.gazebo_fish_sync:main",
+            "pacman_game_manager = enpm690_hw3_phase2.pacman_game_manager:main",
             "marker_publisher = enpm690_hw3_phase2.marker_publisher:main",
-            "shark_auto_controller = enpm690_hw3_phase2.shark_auto_controller:main",
+            "pacman_auto_controller = enpm690_hw3_phase2.pacman_auto_controller:main",
         ],
     },
 )
