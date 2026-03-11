@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -40,6 +41,12 @@ def main() -> None:
             env = SharkHuntLogicalEnv()
             env_name = "logical"
         else:
+            if not args.headless and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+                print(
+                    "[eval_policy] warning: visible Gazebo requested but DISPLAY/WAYLAND_DISPLAY is unset. "
+                    "The Gazebo server may still run, but the GUI window will not appear in this shell session.",
+                    flush=True,
+                )
             env = GazeboSharkHuntEnv(
                 launch_stack=args.launch_stack,
                 stack_timeout=args.stack_timeout,
@@ -47,6 +54,7 @@ def main() -> None:
                 enable_fish_visuals=not args.headless,
                 robot_name="tb3_phase2_train" if args.headless else "tb3_phase2_eval",
                 command_topic="/cmd_vel",
+                launch_log_mode="inherit" if not args.headless else "silent",
             )
             env_name = "gazebo"
         model = PPO.load(str(args.model))

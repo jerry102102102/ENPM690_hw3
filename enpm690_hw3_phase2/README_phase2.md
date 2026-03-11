@@ -53,6 +53,20 @@ ros2 run enpm690_hw3_phase1 keyboard_teleop --ros-args -r /cmd_vel:=/cmd_vel_inp
 ros2 launch enpm690_hw3_phase2 phase2_play_auto.launch.py
 ```
 
+The autonomous controller exposes one report-friendly tunable parameter:
+
+- `behavior_caution`
+  - lower values make the shark more aggressive, faster, and willing to pass closer to obstacles
+  - higher values make it slow down earlier and enter obstacle avoidance sooner
+
+Example runs for comparison:
+
+```bash
+ros2 launch enpm690_hw3_phase2 phase2_play_auto.launch.py behavior_caution:=0.8
+ros2 launch enpm690_hw3_phase2 phase2_play_auto.launch.py behavior_caution:=1.0
+ros2 launch enpm690_hw3_phase2 phase2_play_auto.launch.py behavior_caution:=1.3
+```
+
 ## Training
 
 Default training now uses the Gazebo-backed environment.

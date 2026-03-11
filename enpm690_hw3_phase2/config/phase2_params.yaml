@@ -18,7 +18,22 @@ shark_auto_controller:
     cmd_topic: /cmd_vel_input
     k_target: 1.6
     k_avoid: 1.4
+    k_avoid_far: 0.9
+    k_center_push: 1.8
     control_hz: 10.0
+    behavior_caution: 1.0
+    turn_in_place_proximity: 0.72
+    cruise_speed: 0.22
+    max_speed_scale: 1.0
+    target_lock_seconds: 0.9
+    avoid_enter_proximity: 0.56
+    avoid_exit_proximity: 0.30
+    side_clear_proximity: 0.36
+    avoid_commit_seconds: 0.9
+    recover_seconds: 0.5
+    avoid_turn_speed: 1.25
+    avoid_forward_speed: 0.10
+    recover_turn_speed: 0.55
 
 marker_publisher:
   ros__parameters:

@@ -242,6 +242,75 @@ ros2 launch enpm690_hw3_phase2 phase2_play_auto.launch.py
 
 在這個模式下，fish 邏輯一樣由 `game_manager` 維護，`gazebo_fish_sync` 只負責把 fish 狀態鏡射到 Gazebo，不會把 fish 行為邏輯搬進 Gazebo。
 
+### 6.1 作業要求中的 Tunable Parameter
+
+為了符合作業中「至少要有一個可調參數，且要比較不同值對 autonomous behavior 的影響」這個要求，
+這份 baseline auto controller 已經加入一個單一高階參數：
+
+- `behavior_caution`
+
+這個參數的設計目的是讓你不用同時改很多權重，只要改一個值，就能明顯改變自動策略的風格。
+
+它會同時影響：
+
+- 遇到障礙時多早開始避障
+- 前進速度有多保守
+- 脫離避障狀態的條件
+- 正前方障礙時多早選擇停下原地轉向
+
+直觀上可以這樣理解：
+
+- `behavior_caution` 較小：更激進，速度較快，願意貼近障礙通過
+- `behavior_caution` 較大：更保守，較早減速、較早轉向，碰撞通常較少
+
+### 6.2 在 launch 指令中直接調整參數
+
+你不需要手動改 Python 程式，只要在 launch 時覆蓋參數即可：
+
+```bash
+ros2 launch enpm690_hw3_phase2 phase2_play_auto.launch.py behavior_caution:=0.8
+ros2 launch enpm690_hw3_phase2 phase2_play_auto.launch.py behavior_caution:=1.0
+ros2 launch enpm690_hw3_phase2 phase2_play_auto.launch.py behavior_caution:=1.3
+```
+
+建議把 `1.0` 當作 baseline，另外再測至少兩組值：
+
+- `0.8`：偏 aggressive
+- `1.0`：baseline
+- `1.3`：偏 conservative
+
+### 6.3 建議你在影片與報告中呈現的分析方式
+
+最簡單而且最符合助教預期的做法，是固定地圖與 fish 規則，錄三段自動遊玩影片，分別使用：
+
+- `behavior_caution=0.8`
+- `behavior_caution=1.0`
+- `behavior_caution=1.3`
+
+然後比較下面幾個指標：
+
+- 30 秒最終 score
+- 碰撞次數
+- 是否容易卡在障礙附近
+- 追魚路徑是否平滑
+- 是否因為太保守而降低抓魚效率
+
+如果你要在影片中放一張很簡單的圖，建議用長條圖即可，例如：
+
+- x 軸：`behavior_caution` 值
+- y 軸：final score
+
+你也可以再補第二張圖：
+
+- x 軸：`behavior_caution` 值
+- y 軸：collision count
+
+報告裡可以用很短的方式解釋：
+
+- 較小的 `behavior_caution` 讓機器人更積極追目標，因此速度較快、繞行較貼近障礙，但碰撞風險較高
+- 較大的 `behavior_caution` 讓機器人較早進入避障並降低速度，因此行為較穩定，但可能犧牲抓魚效率與最後得分
+- `1.0` 左右通常是速度與安全性之間較平衡的設定
+
 ## 7. Phase 2 Headless Training Stack
 
 這是只啟動 Gazebo training backend 的 stack。

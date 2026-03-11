@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
 
@@ -110,12 +111,19 @@ def main() -> None:
             print("[train_ppo] environment=logical", flush=True)
         else:
             try:
+                if not args.headless and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+                    print(
+                        "[train_ppo] warning: visible Gazebo requested but DISPLAY/WAYLAND_DISPLAY is unset. "
+                        "The Gazebo server may still run, but the GUI window will not appear in this shell session.",
+                        flush=True,
+                    )
                 env = GazeboSharkHuntEnv(
                     launch_stack=args.launch_stack,
                     stack_timeout=args.stack_timeout,
                     headless=args.headless,
                     enable_fish_visuals=False,
                     command_topic="/cmd_vel",
+                    launch_log_mode="inherit" if not args.headless else "silent",
                 )
             except Exception as exc:
                 raise RuntimeError(

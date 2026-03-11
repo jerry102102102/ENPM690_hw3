@@ -2,9 +2,9 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import ExecuteProcess, IncludeLaunchDescription, SetEnvironmentVariable, TimerAction
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription, SetEnvironmentVariable, TimerAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import EnvironmentVariable
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration
 from launch_ros.actions import Node
 
 
@@ -25,6 +25,11 @@ def generate_launch_description() -> LaunchDescription:
 
     return LaunchDescription(
         [
+            DeclareLaunchArgument(
+                "behavior_caution",
+                default_value="1.0",
+                description="Higher values make the shark avoid obstacles earlier and drive more conservatively.",
+            ),
             SetEnvironmentVariable(
                 "GZ_SIM_RESOURCE_PATH",
                 [
@@ -76,7 +81,7 @@ def generate_launch_description() -> LaunchDescription:
                 package="enpm690_hw3_phase2",
                 executable="shark_auto_controller",
                 output="screen",
-                parameters=[params, {"use_sim_time": True}],
+                parameters=[params, {"use_sim_time": True, "behavior_caution": LaunchConfiguration("behavior_caution")}],
             ),
             Node(
                 package="enpm690_hw3_phase2",
