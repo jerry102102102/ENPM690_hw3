@@ -93,6 +93,16 @@ ros2 run enpm690_hw3_phase1 keyboard_teleop --ros-args -r /cmd_vel:=/cmd_vel_inp
 - keyboard teleop 不是直接發到 `/cmd_vel`
 - 而是先發到 `/cmd_vel_input`
 - Phase 2 game manager 會做 scoring / timer / command gating
+- fish 的權威狀態仍然在 `game_manager`
+- `marker_publisher` 會把 fish / HUD 發到 RViz
+- `gazebo_fish_sync` 會訂閱 `/phase2/fish_state_json`，把同一份 fish 狀態同步到 Gazebo entity
+
+這代表在 teleop play 模式下，你應該同時看到：
+
+- RViz 裡的 fish markers 會移動
+- Gazebo 裡的 fish entity 也會移動
+- 魚被抓到時，Gazebo 裡的 fish 會消失或暫時掉到地板下方
+- fish respawn 後會在新位置重新出現
 
 ## 6. Phase 2 Baseline Auto Play
 
@@ -110,8 +120,12 @@ ros2 launch enpm690_hw3_phase2 phase2_play_auto.launch.py
 - Gazebo GUI
 - RViz
 - shark robot
+- game manager
 - fish marker / game state
+- gazebo fish sync
 - baseline auto controller
+
+在這個模式下，fish 邏輯一樣由 `game_manager` 維護，`gazebo_fish_sync` 只負責把 fish 狀態鏡射到 Gazebo，不會把 fish 行為邏輯搬進 Gazebo。
 
 ## 7. Phase 2 Headless Training Stack
 
@@ -315,7 +329,7 @@ ls artifacts/phase2_ppo
 
 ## 16. 檢查 fish entity / Gazebo entity
 
-如果你想確認 fish entity 有沒有真的被 spawn 到 Gazebo：
+如果你想確認 fish entity 有沒有真的被 spawn 到 Gazebo，或 play/demo 模式下 fish 有沒有被持續同步：
 
 ```bash
 ros2 service list | grep entity
@@ -323,7 +337,21 @@ ros2 service list | grep entity
 
 如果你的系統有對應 CLI 或 service call helper，也可以查 `/gzserver/get_entities`。
 
-至少在程式設計上，Gazebo-backed env 會用這些 service：
+play / demo 模式下，`gazebo_fish_sync` 會吃 `/phase2/fish_state_json`，然後透過 Gazebo simulation interface 做這些事：
+
+- spawn fish entity
+- set fish entity state
+- 必要時查現有 entity
+
+Training mode 不依賴這個 play-mode node；Gazebo-backed env 仍然走它自己在 `gazebo_env.py` 內的 fish sync 路徑。
+
+如果你在 `phase2_play_teleop.launch.py` 或 `phase2_play_auto.launch.py` 裡看不到 Gazebo fish 移動，可以先檢查：
+
+- `ros2 run enpm690_hw3_phase2 gazebo_fish_sync` 是否可解析
+- launch 後 `gazebo_fish_sync` node 是否真的有起來
+- `/phase2/fish_state_json` 是否有持續更新
+
+至少在程式設計上，Gazebo-backed env 會另外用這些 service：
 
 - spawn fish entity
 - set fish entity state
