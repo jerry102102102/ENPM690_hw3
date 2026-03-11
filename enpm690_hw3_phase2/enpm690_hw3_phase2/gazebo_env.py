@@ -45,6 +45,7 @@ from .constants import (
     SharkState,
 )
 from .fish_manager import FishManager
+from .gazebo_fish_utils import fish_model_paths, make_get_entities_request, make_set_entity_state_request, make_spawn_entity_request
 from .geometry_utils import angle_diff, bearing_xy, distance_xy
 from .observation_builder import ObservationBuilder
 from .reward_builder import RewardBuilder
@@ -427,18 +428,10 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
         }
 
     def _fish_model_paths(self) -> dict[str, Path]:
-        share = Path(get_package_share_directory("enpm690_hw3_phase2"))
-        return {
-            "tuna": share / "models" / "tuna_simple" / "model.sdf",
-            "sardine": share / "models" / "sardine_simple" / "model.sdf",
-            "seaweed": share / "models" / "seaweed_simple" / "model.sdf",
-        }
+        return fish_model_paths()
 
     def _get_entity_names(self) -> set[str]:
-        request = GetEntities.Request()
-        request.filters = EntityFilters()
-        request.filters.filter = ""
-        response = self._call_service(self.node.get_entities_client, request, timeout_sec=self.stack_timeout)
+        response = self._call_service(self.node.get_entities_client, make_get_entities_request(), timeout_sec=self.stack_timeout)
         return set(response.entities)
 
     def _ensure_fish_entities(self) -> None:
@@ -449,16 +442,12 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
             if fish.fish_id in existing:
                 self.entity_name_map[fish.fish_id] = fish.fish_id
                 continue
-            request = SpawnEntity.Request()
-            request.name = fish.fish_id
-            request.allow_renaming = False
-            request.entity_resource = Resource(uri=self.fish_model_paths[fish.species].as_uri(), resource_string="")
-            request.initial_pose = PoseStamped()
-            request.initial_pose.header.frame_id = "world"
-            request.initial_pose.pose.position.x = fish.x
-            request.initial_pose.pose.position.y = fish.y
-            request.initial_pose.pose.position.z = 0.15
-            request.initial_pose.pose.orientation.w = 1.0
+            request = make_spawn_entity_request(
+                entity_name=fish.fish_id,
+                model_path=self.fish_model_paths[fish.species],
+                x=fish.x,
+                y=fish.y,
+            )
             response = self._call_service(self.node.spawn_entity_client, request, timeout_sec=self.stack_timeout)
             entity_name = getattr(response, "entity_name", fish.fish_id) or fish.fish_id
             self.entity_name_map[fish.fish_id] = entity_name
@@ -471,23 +460,12 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
 
     def _set_fish_entity_state(self, fish) -> None:
         entity_name = self.entity_name_map.get(fish.fish_id, fish.fish_id)
-        request = SetEntityState.Request()
-        request.entity = entity_name
-        request.state = EntityState()
-        request.state.header.frame_id = "world"
-        request.state.pose.position.x = fish.x
-        request.state.pose.position.y = fish.y
-        request.state.pose.position.z = -2.0 if not fish.active else 0.15
-        request.state.pose.orientation.w = 1.0
-        request.state.twist.linear.x = 0.0
-        request.state.twist.linear.y = 0.0
-        request.state.twist.linear.z = 0.0
-        request.state.twist.angular.x = 0.0
-        request.state.twist.angular.y = 0.0
-        request.state.twist.angular.z = 0.0
-        request.set_pose = True
-        request.set_twist = True
-        request.set_acceleration = False
+        request = make_set_entity_state_request(
+            entity_name=entity_name,
+            x=fish.x,
+            y=fish.y,
+            active=fish.active,
+        )
         self._call_service(self.node.set_entity_state_client, request, timeout_sec=self.stack_timeout)
 
     def _set_robot_state(self, shark: SharkState, zero_twist: bool = True) -> None:

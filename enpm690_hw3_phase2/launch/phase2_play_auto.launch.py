@@ -50,6 +50,12 @@ def generate_launch_description() -> LaunchDescription:
             ),
             Node(
                 package="enpm690_hw3_phase2",
+                executable="gazebo_fish_sync",
+                output="screen",
+                parameters=[{"use_sim_time": True}],
+            ),
+            Node(
+                package="enpm690_hw3_phase2",
                 executable="shark_auto_controller",
                 output="screen",
                 parameters=[params, {"use_sim_time": True}],
