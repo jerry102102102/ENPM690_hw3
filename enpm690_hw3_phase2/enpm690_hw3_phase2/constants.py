@@ -106,6 +106,31 @@ class Obstacle:
 
 PHASE2_WORLD_BOUNDS = WorldBounds(x_min=-4.8, x_max=4.8, y_min=-4.8, y_max=4.8)
 PHASE2_OBSTACLES: tuple[Obstacle, ...] = ()
+PACMAN_OBJECT_LAYOUT: tuple[tuple[str, str, float, float], ...] = (
+    ("tuna_0", "tuna", -3.6, 3.4),
+    ("tuna_1", "tuna", 0.0, 3.6),
+    ("tuna_2", "tuna", 3.4, 3.0),
+    ("tuna_3", "tuna", -3.0, -3.3),
+    ("tuna_4", "tuna", 3.1, -3.4),
+    ("sardine_0", "sardine", -2.4, 2.2),
+    ("sardine_1", "sardine", -1.2, 2.0),
+    ("sardine_2", "sardine", 1.2, 2.0),
+    ("sardine_3", "sardine", 2.4, 2.2),
+    ("sardine_4", "sardine", -2.2, 0.9),
+    ("sardine_5", "sardine", 2.2, 0.9),
+    ("sardine_6", "sardine", -2.2, -0.9),
+    ("sardine_7", "sardine", 2.2, -0.9),
+    ("sardine_8", "sardine", -1.2, -2.0),
+    ("sardine_9", "sardine", 1.2, -2.0),
+    ("seaweed_0", "seaweed", -3.7, 0.0),
+    ("seaweed_1", "seaweed", -2.8, 0.0),
+    ("seaweed_2", "seaweed", -1.8, 0.0),
+    ("seaweed_3", "seaweed", -0.9, 0.0),
+    ("seaweed_4", "seaweed", 0.9, 0.0),
+    ("seaweed_5", "seaweed", 1.8, 0.0),
+    ("seaweed_6", "seaweed", 2.8, 0.0),
+    ("seaweed_7", "seaweed", 3.7, 0.0),
+)
 
 DEFAULT_SHARK_SPAWN = (0.0, 0.0, 0.0)
 

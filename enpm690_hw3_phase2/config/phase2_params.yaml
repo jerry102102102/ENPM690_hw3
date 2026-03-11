@@ -21,25 +21,21 @@ shark_auto_controller:
   ros__parameters:
     cmd_topic: /cmd_vel_input
     control_hz: 10.0
-    k_target: 1.8
-    k_wall_avoid: 1.1
-    behavior_caution: 1.0
-    search_forward_speed: 0.28
-    search_turn_speed: 0.85
-    lock_linear_speed: 0.55
-    lock_min_linear_speed: 0.12
-    search_hint_refresh_sec: 1.5
-    search_hint_gain: 0.9
-    chase_lost_timeout_sec: 0.8
-    wall_stop_distance: 0.24
-    wall_slow_distance: 0.70
-    lidar_target_bias: 0.9
+    search_forward_speed: 0.22
+    search_turn_speed: 0.70
+    chase_linear_speed: 0.52
+    chase_turn_gain: 1.8
+    chase_min_linear_speed: 0.10
+    chase_lost_timeout_sec: 0.6
+    wall_turn_gain: 1.2
+    wall_stop_distance: 0.26
+    wall_slow_distance: 0.75
     lidar_cluster_jump_distance: 0.22
     lidar_cluster_min_beams: 2
-    lidar_cluster_max_beams: 18
+    lidar_cluster_max_beams: 14
     lidar_cluster_max_width: 0.55
-    lidar_cluster_max_range: 3.0
-    lidar_front_fov_deg: 140.0
+    lidar_cluster_max_range: 3.2
+    lidar_front_fov_deg: 160.0
 
 marker_publisher:
   ros__parameters:

@@ -26,19 +26,15 @@ def generate_launch_description() -> LaunchDescription:
     return LaunchDescription(
         [
             DeclareLaunchArgument(
-                "behavior_caution",
-                default_value="1.0",
-                description="Higher values make the shark avoid obstacles earlier and drive more conservatively.",
+                "search_forward_speed",
+                default_value="0.22",
             ),
-            DeclareLaunchArgument("search_forward_speed", default_value="0.28"),
-            DeclareLaunchArgument("search_turn_speed", default_value="0.85"),
-            DeclareLaunchArgument("lock_linear_speed", default_value="0.55"),
-            DeclareLaunchArgument("lidar_target_bias", default_value="0.9"),
-            DeclareLaunchArgument("search_hint_refresh_sec", default_value="1.5"),
-            DeclareLaunchArgument("search_hint_gain", default_value="0.9"),
-            DeclareLaunchArgument("chase_lost_timeout_sec", default_value="0.8"),
-            DeclareLaunchArgument("tuna_speed_scale", default_value="0.35"),
-            DeclareLaunchArgument("sardine_speed_scale", default_value="0.18"),
+            DeclareLaunchArgument("search_turn_speed", default_value="0.70"),
+            DeclareLaunchArgument("chase_linear_speed", default_value="0.52"),
+            DeclareLaunchArgument("chase_turn_gain", default_value="1.8"),
+            DeclareLaunchArgument("chase_lost_timeout_sec", default_value="0.6"),
+            DeclareLaunchArgument("tuna_speed_scale", default_value="0.0"),
+            DeclareLaunchArgument("sardine_speed_scale", default_value="0.0"),
             SetEnvironmentVariable(
                 "GZ_SIM_RESOURCE_PATH",
                 [
@@ -104,13 +100,10 @@ def generate_launch_description() -> LaunchDescription:
                     params,
                     {
                         "use_sim_time": True,
-                        "behavior_caution": LaunchConfiguration("behavior_caution"),
                         "search_forward_speed": LaunchConfiguration("search_forward_speed"),
                         "search_turn_speed": LaunchConfiguration("search_turn_speed"),
-                        "lock_linear_speed": LaunchConfiguration("lock_linear_speed"),
-                        "lidar_target_bias": LaunchConfiguration("lidar_target_bias"),
-                        "search_hint_refresh_sec": LaunchConfiguration("search_hint_refresh_sec"),
-                        "search_hint_gain": LaunchConfiguration("search_hint_gain"),
+                        "chase_linear_speed": LaunchConfiguration("chase_linear_speed"),
+                        "chase_turn_gain": LaunchConfiguration("chase_turn_gain"),
                         "chase_lost_timeout_sec": LaunchConfiguration("chase_lost_timeout_sec"),
                     },
                 ],
