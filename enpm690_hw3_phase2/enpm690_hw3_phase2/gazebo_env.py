@@ -127,6 +127,7 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
         self.game.fish_manager.rng = self.rng
         self.reward_builder = RewardBuilder()
         self.steps = 0
+        self._consecutive_scan_reuse = 0
 
         self.launch_process: subprocess.Popen[str] | None = None
         self.launch_log_handle: TextIO | None = None
@@ -177,7 +178,8 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
         self._set_robot_state(self.game.shark)
         self._ensure_fish_entities()
         self._sync_all_fish_to_gazebo()
-        self._step_and_wait(self.physics_steps_per_action)
+        self._consecutive_scan_reuse = 0
+        self._step_and_wait(self.physics_steps_per_action, require_fresh_scan=True)
         self._update_shark_from_odom_into_game()
         observation = self._build_observation()
         info = self.game.build_info(collision=False, reward_components={})
@@ -199,7 +201,7 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
             cmd.angular.z = float(action[1]) * SHARK_MAX_ANGULAR_SPEED
 
         self.node.cmd_pub.publish(cmd)
-        self._step_and_wait(self.physics_steps_per_action)
+        self._step_and_wait(self.physics_steps_per_action, require_fresh_scan=False)
         self._update_shark_from_odom_into_game()
 
         collision = self.game.trigger_collision_if_needed()
@@ -341,7 +343,7 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
         request.state.state = SimulationState.STATE_PAUSED
         self._call_service(self.node.set_sim_state_client, request, timeout_sec=self.stack_timeout)
 
-    def _step_and_wait(self, steps: int) -> None:
+    def _step_and_wait(self, steps: int, require_fresh_scan: bool) -> None:
         previous_scan_count = self.node.scan_count
         previous_odom_count = self.node.odom_count
         deadline = time.time() + self.stack_timeout
@@ -351,7 +353,18 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
             request.steps = min(steps - stepped, 20)
             self._call_service(self.node.step_client, request, timeout_sec=self.stack_timeout)
             stepped += request.steps
-            if self.node.scan_count > previous_scan_count and self.node.odom_count > previous_odom_count:
+            fresh_odom = self.node.odom_count > previous_odom_count
+            fresh_scan = self.node.scan_count > previous_scan_count
+            if fresh_odom and (fresh_scan or (not require_fresh_scan and self.node.latest_scan is not None)):
+                if fresh_scan:
+                    self._consecutive_scan_reuse = 0
+                else:
+                    self._consecutive_scan_reuse += 1
+                    if self._consecutive_scan_reuse in {1, 10, 50}:
+                        self._log_debug(
+                            "reusing previous lidar scan for this step; "
+                            + self._sensor_diagnostics(prefix="scan_reuse")
+                        )
                 return
             if stepped >= steps:
                 break
@@ -360,12 +373,14 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
         likely_cause = ""
         if self.node.odom_count > previous_odom_count and self.node.scan_count == previous_scan_count:
             likely_cause = (
-                " Likely cause: /odom is updating but /scan is not, which usually means the lidar "
-                "sensor is not producing data in the current Gazebo stack. In this project that often "
-                "points to headless GPU lidar/rendering behavior rather than PPO or game-manager wiring."
+                " Likely cause: /odom is updating but /scan is not. If this happens only in headless mode, "
+                "it usually points to Gazebo GPU lidar/rendering behavior. If it also happens in visible mode, "
+                "the lidar publish cadence is lower than the stepped training cadence and the env should reuse "
+                "the previous scan instead of requiring a fresh one every step."
             )
+        expectation = "fresh /odom and fresh /scan" if require_fresh_scan else "fresh /odom and any available /scan"
         raise TimeoutError(
-            "Timed out waiting for fresh /scan and /odom after stepping Gazebo. "
+            f"Timed out waiting for {expectation} after stepping Gazebo. "
             f"stepped={stepped} scan_count={self.node.scan_count - previous_scan_count} "
             f"odom_count={self.node.odom_count - previous_odom_count}. "
             + diagnostics

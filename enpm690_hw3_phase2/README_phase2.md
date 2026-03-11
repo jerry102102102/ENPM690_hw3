@@ -81,6 +81,12 @@ Train:
 python -m enpm690_hw3_phase2.train_ppo --launch-stack --timesteps 20000 --output-dir artifacts/phase2_ppo
 ```
 
+Training defaults are tuned for easier debugging:
+
+- visible Gazebo stack by default
+- `--device cpu` by default for PPO with `MlpPolicy`
+- Gazebo training reuses the most recent lidar scan when odometry is fresh but lidar publishes more slowly than the stepped RL loop
+
 Evaluate:
 
 ```bash

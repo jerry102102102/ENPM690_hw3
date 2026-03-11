@@ -37,7 +37,8 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts/phase2_ppo"))
     parser.add_argument("--launch-stack", action="store_true")
     parser.add_argument("--stack-timeout", type=float, default=45.0)
-    parser.add_argument("--headless", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--headless", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--device", choices=["cpu", "cuda", "auto"], default="cpu")
     parser.add_argument("--use-logical-env", action="store_true")
     args = parser.parse_args()
 
@@ -81,7 +82,13 @@ def main() -> None:
         if isinstance(env, GazeboSharkHuntEnv):
             env.run_motion_smoke_test()
 
-        model = PPO("MlpPolicy", env, verbose=1, tensorboard_log=str(args.output_dir / "tensorboard"))
+        model = PPO(
+            "MlpPolicy",
+            env,
+            verbose=1,
+            tensorboard_log=str(args.output_dir / "tensorboard"),
+            device=args.device,
+        )
         model.learn(total_timesteps=args.timesteps)
         model.save(str(args.output_dir / "ppo_shark_hunt"))
 

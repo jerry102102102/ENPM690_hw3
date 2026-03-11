@@ -143,6 +143,21 @@ source scripts/dev_env.sh
 python -m enpm690_hw3_phase2.train_ppo --launch-stack --stack-timeout 90 --timesteps 20000 --output-dir artifacts/phase2_ppo
 ```
 
+目前預設 training 會：
+
+- 使用 visible Gazebo stack，方便直接看場景
+- 使用 CPU 跑 PPO
+
+如果你真的要 headless，再額外加 `--headless`。
+如果你真的要 GPU，再額外加 `--device cuda`。
+
+另外，Gazebo-backed training 現在允許：
+
+- `/odom` 必須是 fresh
+- `/scan` 如果這一步沒有新資料，可以沿用上一筆 lidar
+
+這是因為 Gazebo stepped simulation 下，lidar 發布頻率可能低於每個 RL step 的節奏。
+
 如果你沒有先手動啟動 `phase2_train.launch.py`，又沒有加 `--launch-stack`，那麼 `train_ppo` 在 `check_env()` 或 `reset()` 階段很可能會卡在：
 
 - 等不到新的 `/scan`
