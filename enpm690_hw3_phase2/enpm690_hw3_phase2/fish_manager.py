@@ -27,10 +27,17 @@ from .prey_behaviors import sardine_heading_update, tuna_heading_update
 
 
 class FishManager:
-    def __init__(self, bounds: WorldBounds, obstacles: tuple[Obstacle, ...], rng: random.Random | None = None) -> None:
+    def __init__(
+        self,
+        bounds: WorldBounds,
+        obstacles: tuple[Obstacle, ...],
+        rng: random.Random | None = None,
+        species_speed_scales: dict[str, float] | None = None,
+    ) -> None:
         self.bounds = bounds
         self.obstacles = obstacles
         self.rng = rng or random.Random()
+        self.species_speed_scales = species_speed_scales or {}
         self.fish: list[FishState] = []
 
     def reset(self) -> list[FishState]:
@@ -53,7 +60,7 @@ class FishManager:
                 x=x,
                 y=y,
                 heading=self.rng.uniform(-math.pi, math.pi),
-                speed=SPECIES_CONFIGS["tuna"].speed_scale * SHARK_MAX_LINEAR_SPEED,
+                speed=self._speed_for_species("tuna"),
                 radius=SPECIES_CONFIGS["tuna"].radius,
             )
             self.fish.append(fish)
@@ -78,7 +85,7 @@ class FishManager:
                     x=x,
                     y=y,
                     heading=self.rng.uniform(-math.pi, math.pi),
-                    speed=SPECIES_CONFIGS["sardine"].speed_scale * SHARK_MAX_LINEAR_SPEED,
+                    speed=self._speed_for_species("sardine"),
                     radius=SPECIES_CONFIGS["sardine"].radius,
                     school_id=school_id,
                 )
@@ -107,9 +114,17 @@ class FishManager:
 
         return self.fish
 
-    def update(self, dt: float, shark: SharkState | None = None, immediate_respawn: bool = False) -> None:
+    def update(
+        self,
+        dt: float,
+        shark: SharkState | None = None,
+        immediate_respawn: bool = False,
+        respawn_enabled: bool = True,
+    ) -> None:
         for fish in self.fish:
             if not fish.active:
+                if not respawn_enabled:
+                    continue
                 fish.respawn_timer -= dt
                 if fish.respawn_timer <= 0.0:
                     self._respawn_single(fish, immediate=immediate_respawn)
@@ -144,14 +159,19 @@ class FishManager:
 
         self._resolve_fish_collisions()
 
-    def detect_catches(self, shark: SharkState, immediate_respawn: bool = False) -> list[CatchEvent]:
+    def detect_catches(
+        self,
+        shark: SharkState,
+        immediate_respawn: bool = False,
+        respawn_enabled: bool = True,
+    ) -> list[CatchEvent]:
         catches: list[CatchEvent] = []
         for fish in self.fish:
             if not fish.active:
                 continue
             if distance_xy(shark.x, shark.y, fish.x, fish.y) <= SHARK_CATCH_RADIUS + fish.radius:
                 fish.active = False
-                fish.respawn_timer = 0.0 if immediate_respawn else 0.25
+                fish.respawn_timer = 0.0 if (immediate_respawn and respawn_enabled) else -1.0
                 catches.append(
                     CatchEvent(
                         fish_id=fish.fish_id,
@@ -159,7 +179,7 @@ class FishManager:
                         score_delta=SPECIES_CONFIGS[fish.species].score,
                     )
                 )
-                if immediate_respawn:
+                if immediate_respawn and respawn_enabled:
                     self._respawn_single(fish, immediate=True)
         return catches
 
@@ -178,7 +198,7 @@ class FishManager:
         elif fish.species == "tuna":
             x, y = sample_free_point(self.rng, self.bounds, self.obstacles, fish.radius, occupied, x_range=(-3.5, 3.8), y_range=(-3.8, 3.8))
             fish.heading = self.rng.uniform(-math.pi, math.pi)
-            fish.speed = SPECIES_CONFIGS["tuna"].speed_scale * SHARK_MAX_LINEAR_SPEED
+            fish.speed = self._speed_for_species("tuna")
         else:
             school_center = (-2.0, -0.6) if fish.school_id == 0 else (2.4, 1.4)
             x, y = sample_free_point(
@@ -191,7 +211,7 @@ class FishManager:
                 y_range=(school_center[1] - 0.8, school_center[1] + 0.8),
             )
             fish.heading = self.rng.uniform(-math.pi, math.pi)
-            fish.speed = SPECIES_CONFIGS["sardine"].speed_scale * SHARK_MAX_LINEAR_SPEED
+            fish.speed = self._speed_for_species("sardine")
 
         fish.x = x
         fish.y = y
@@ -216,3 +236,10 @@ class FishManager:
                     other.y += 0.5 * overlap * ny
                     fish.heading = math.atan2(-ny, -nx)
                     other.heading = math.atan2(ny, nx)
+
+    def active_count(self) -> int:
+        return sum(1 for fish in self.fish if fish.active)
+
+    def _speed_for_species(self, species: str) -> float:
+        scale = self.species_speed_scales.get(species, SPECIES_CONFIGS[species].speed_scale)
+        return scale * SHARK_MAX_LINEAR_SPEED

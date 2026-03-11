@@ -64,8 +64,20 @@ class GameCore:
         return True
 
     def advance_episode(self, *, immediate_respawn: bool) -> list[CatchEvent]:
-        self.fish_manager.update(self.dt, self.shark, immediate_respawn=immediate_respawn)
-        catches = self.fish_manager.detect_catches(self.shark, immediate_respawn=immediate_respawn)
+        return self.advance_episode_with_options(immediate_respawn=immediate_respawn, respawn_enabled=True)
+
+    def advance_episode_with_options(self, *, immediate_respawn: bool, respawn_enabled: bool) -> list[CatchEvent]:
+        self.fish_manager.update(
+            self.dt,
+            self.shark,
+            immediate_respawn=immediate_respawn,
+            respawn_enabled=respawn_enabled,
+        )
+        catches = self.fish_manager.detect_catches(
+            self.shark,
+            immediate_respawn=immediate_respawn,
+            respawn_enabled=respawn_enabled,
+        )
         for event in catches:
             self.score += event.score_delta
             self.catch_counts[event.species] += 1

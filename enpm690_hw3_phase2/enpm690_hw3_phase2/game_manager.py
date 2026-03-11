@@ -19,6 +19,7 @@ from .constants import (
     CatchEvent,
 )
 from .game_core import GameCore
+from .fish_manager import FishManager
 from .spawn_utils import fish_states_to_json, game_snapshot_to_json
 
 
@@ -44,6 +45,10 @@ class GameManager(Node):
         self.declare_parameter("game_state_topic", "/phase2/game_state_json")
         self.declare_parameter("fish_sync_ready_topic", "/phase2/fish_sync_ready")
         self.declare_parameter("auto_reset", True)
+        self.declare_parameter("respawn_caught_fish", True)
+        self.declare_parameter("tuna_speed_scale", 0.8)
+        self.declare_parameter("sardine_speed_scale", 0.4)
+        self.declare_parameter("seaweed_speed_scale", 0.0)
 
         self.mode = str(self.get_parameter("mode").value)
         self.cmd_input_topic = str(self.get_parameter("cmd_input_topic").value)
@@ -51,14 +56,23 @@ class GameManager(Node):
         self.episode_duration = float(self.get_parameter("episode_duration").value)
         self.dt = float(self.get_parameter("game_dt").value)
         self.auto_reset = bool(self.get_parameter("auto_reset").value)
+        self.respawn_caught_fish = bool(self.get_parameter("respawn_caught_fish").value)
+        species_speed_scales = {
+            "tuna": float(self.get_parameter("tuna_speed_scale").value),
+            "sardine": float(self.get_parameter("sardine_speed_scale").value),
+            "seaweed": float(self.get_parameter("seaweed_speed_scale").value),
+        }
 
-        self.game = GameCore(episode_duration=self.episode_duration, dt=self.dt)
+        fish_manager = FishManager(self._default_bounds(), self._default_obstacles(), species_speed_scales=species_speed_scales)
+        self.game = GameCore(episode_duration=self.episode_duration, dt=self.dt, fish_manager=fish_manager)
         self.latest_scan: LaserScan | None = None
         self.latest_cmd = Twist()
         self.latest_cmd_time = self.get_clock().now()
         self.fish_sync_ready = self.mode == MODE_TRAIN
         self.waiting_for_sync = self.mode != MODE_TRAIN
         self._logged_waiting_for_sync = False
+        self.completed = False
+        self.start_time = self.get_clock().now()
 
         self.score_pub = self.create_publisher(Int32, str(self.get_parameter("score_topic").value), 10)
         self.time_pub = self.create_publisher(Float32, str(self.get_parameter("time_topic").value), 10)
@@ -78,6 +92,8 @@ class GameManager(Node):
 
     def reset_episode(self, initial: bool = False) -> None:
         self.game.reset()
+        self.completed = False
+        self.start_time = self.get_clock().now()
         self.waiting_for_sync = self.mode != MODE_TRAIN and not self.fish_sync_ready
         self._logged_waiting_for_sync = False
         if initial:
@@ -117,6 +133,11 @@ class GameManager(Node):
             self.waiting_for_sync = True
 
     def _tick(self) -> None:
+        if self.completed:
+            self.cmd_output_pub.publish(Twist())
+            self._publish_status()
+            return
+
         if self.waiting_for_sync:
             self.cmd_output_pub.publish(Twist())
             self._publish_status()
@@ -137,11 +158,18 @@ class GameManager(Node):
             gated_cmd = self._fresh_cmd_or_zero()
         self.cmd_output_pub.publish(gated_cmd)
 
-        catches = self.game.advance_episode(immediate_respawn=self.mode == MODE_TRAIN)
+        catches = self.game.advance_episode_with_options(
+            immediate_respawn=self.mode == MODE_TRAIN,
+            respawn_enabled=self.respawn_caught_fish or self.mode == MODE_TRAIN,
+        )
         if catches:
             self._handle_catches(catches)
 
         self._publish_status()
+
+        if self.game.fish_manager.active_count() == 0:
+            self._complete_run()
+            return
 
         if self.game.time_remaining <= 0.0:
             self.get_logger().info(f"[GAME] episode ended score={self.game.score} catches={json.dumps(self.game.catch_counts)}")
@@ -167,6 +195,29 @@ class GameManager(Node):
         self.fish_state_pub.publish(String(data=fish_states_to_json(self.game.fish_manager.fish)))
         snapshot = self.game.build_snapshot(mode=self.mode, sync_ready=not self.waiting_for_sync)
         self.game_state_pub.publish(String(data=game_snapshot_to_json(snapshot)))
+
+    def _complete_run(self) -> None:
+        self.completed = True
+        self.cmd_output_pub.publish(Twist())
+        elapsed = (self.get_clock().now() - self.start_time).nanoseconds / 1e9
+        summary = (
+            "[GAME] run complete "
+            f"elapsed={elapsed:.1f}s score={self.game.score} "
+            f"tuna={self.game.catch_counts['tuna']} sardine={self.game.catch_counts['sardine']} "
+            f"seaweed={self.game.catch_counts['seaweed']}"
+        )
+        self.get_logger().info(summary)
+        self.catch_event_pub.publish(String(data=summary))
+
+    def _default_bounds(self):
+        from .constants import PHASE2_WORLD_BOUNDS
+
+        return PHASE2_WORLD_BOUNDS
+
+    def _default_obstacles(self):
+        from .constants import PHASE2_OBSTACLES
+
+        return PHASE2_OBSTACLES
 
 
 def main() -> None:

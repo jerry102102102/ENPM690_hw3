@@ -32,10 +32,6 @@ class SectorProximities:
     right: float
     far_right: float
 
-    @property
-    def obstacle_strength(self) -> float:
-        return max(self.far_left, self.left, self.center, self.right, self.far_right)
-
 
 @dataclass(frozen=True)
 class LidarCluster:
@@ -49,24 +45,16 @@ class SharkAutoController(Node):
     def __init__(self) -> None:
         super().__init__("shark_auto_controller")
         self.declare_parameter("cmd_topic", "/cmd_vel_input")
-        self.declare_parameter("k_target", 1.6)
-        self.declare_parameter("k_avoid", 1.4)
-        self.declare_parameter("k_avoid_far", 0.9)
-        self.declare_parameter("k_center_push", 1.8)
         self.declare_parameter("control_hz", 10.0)
+        self.declare_parameter("k_target", 1.8)
+        self.declare_parameter("k_wall_avoid", 1.1)
         self.declare_parameter("behavior_caution", 1.0)
-        self.declare_parameter("turn_in_place_distance", 0.32)
-        self.declare_parameter("cruise_speed", 0.22)
-        self.declare_parameter("max_speed_scale", 1.0)
-        self.declare_parameter("target_lock_seconds", 0.9)
-        self.declare_parameter("avoid_enter_distance", 0.80)
-        self.declare_parameter("avoid_exit_distance", 0.95)
-        self.declare_parameter("side_clear_distance", 0.72)
-        self.declare_parameter("avoid_commit_seconds", 0.9)
-        self.declare_parameter("recover_seconds", 0.5)
-        self.declare_parameter("avoid_turn_speed", 1.25)
-        self.declare_parameter("avoid_forward_speed", 0.16)
-        self.declare_parameter("recover_turn_speed", 0.55)
+        self.declare_parameter("search_forward_speed", 0.28)
+        self.declare_parameter("search_turn_speed", 0.85)
+        self.declare_parameter("lock_linear_speed", 0.55)
+        self.declare_parameter("lock_min_linear_speed", 0.12)
+        self.declare_parameter("wall_stop_distance", 0.24)
+        self.declare_parameter("wall_slow_distance", 0.70)
         self.declare_parameter("lidar_target_bias", 0.9)
         self.declare_parameter("lidar_cluster_jump_distance", 0.22)
         self.declare_parameter("lidar_cluster_min_beams", 2)
@@ -77,23 +65,14 @@ class SharkAutoController(Node):
 
         self.cmd_topic = str(self.get_parameter("cmd_topic").value)
         self.k_target = float(self.get_parameter("k_target").value)
-        self.k_avoid = float(self.get_parameter("k_avoid").value)
-        self.k_avoid_far = float(self.get_parameter("k_avoid_far").value)
-        self.k_center_push = float(self.get_parameter("k_center_push").value)
-        control_hz = float(self.get_parameter("control_hz").value)
+        self.k_wall_avoid = float(self.get_parameter("k_wall_avoid").value)
         self.behavior_caution = float(self.get_parameter("behavior_caution").value)
-        self.turn_in_place_distance = float(self.get_parameter("turn_in_place_distance").value)
-        self.cruise_speed = float(self.get_parameter("cruise_speed").value)
-        self.max_speed_scale = float(self.get_parameter("max_speed_scale").value)
-        self.target_lock_seconds = float(self.get_parameter("target_lock_seconds").value)
-        self.avoid_enter_distance = float(self.get_parameter("avoid_enter_distance").value)
-        self.avoid_exit_distance = float(self.get_parameter("avoid_exit_distance").value)
-        self.side_clear_distance = float(self.get_parameter("side_clear_distance").value)
-        self.avoid_commit_seconds = float(self.get_parameter("avoid_commit_seconds").value)
-        self.recover_seconds = float(self.get_parameter("recover_seconds").value)
-        self.avoid_turn_speed = float(self.get_parameter("avoid_turn_speed").value)
-        self.avoid_forward_speed = float(self.get_parameter("avoid_forward_speed").value)
-        self.recover_turn_speed = float(self.get_parameter("recover_turn_speed").value)
+        self.search_forward_speed = float(self.get_parameter("search_forward_speed").value)
+        self.search_turn_speed = float(self.get_parameter("search_turn_speed").value)
+        self.lock_linear_speed = float(self.get_parameter("lock_linear_speed").value)
+        self.lock_min_linear_speed = float(self.get_parameter("lock_min_linear_speed").value)
+        self.wall_stop_distance = float(self.get_parameter("wall_stop_distance").value)
+        self.wall_slow_distance = float(self.get_parameter("wall_slow_distance").value)
         self.lidar_target_bias = float(self.get_parameter("lidar_target_bias").value)
         self.lidar_cluster_jump_distance = float(self.get_parameter("lidar_cluster_jump_distance").value)
         self.lidar_cluster_min_beams = int(self.get_parameter("lidar_cluster_min_beams").value)
@@ -101,18 +80,15 @@ class SharkAutoController(Node):
         self.lidar_cluster_max_width = float(self.get_parameter("lidar_cluster_max_width").value)
         self.lidar_cluster_max_range = float(self.get_parameter("lidar_cluster_max_range").value)
         self.lidar_front_fov_deg = float(self.get_parameter("lidar_front_fov_deg").value)
+        control_hz = float(self.get_parameter("control_hz").value)
 
         self.shark = SharkState()
         self.scan: LaserScan | None = None
         self.fish_state_payload = ""
         self.game_state_payload = ""
-        self.last_target_log_time = self.get_clock().now()
-        self.mode = "chase"
-        self.avoid_direction = 1.0
-        self.avoid_until = 0.0
-        self.recover_until = 0.0
+        self.mode = "searching"
         self.locked_target_id = ""
-        self.target_lock_until = 0.0
+        self.last_log_time = self.get_clock().now()
 
         self.cmd_pub = self.create_publisher(Twist, self.cmd_topic, 10)
         self.create_subscription(Odometry, "/odom", self._odom_callback, 20)
@@ -120,10 +96,6 @@ class SharkAutoController(Node):
         self.create_subscription(String, "/phase2/fish_state_json", self._fish_callback, 10)
         self.create_subscription(String, "/phase2/game_state_json", self._game_callback, 10)
         self.create_timer(1.0 / control_hz, self._tick)
-        self.get_logger().info(
-            f"[AUTO] behavior_caution={self.behavior_caution:.2f} "
-            "(higher means earlier avoidance and lower forward speed)"
-        )
 
     def _odom_callback(self, msg: Odometry) -> None:
         self.shark.x = msg.pose.pose.position.x
@@ -152,189 +124,114 @@ class SharkAutoController(Node):
         if not bool(game_state.get("sync_ready", True)):
             self.cmd_pub.publish(Twist())
             return
-        cooldown = float(game_state.get("collision_cooldown", 0.0))
-        if cooldown > 0.0:
+        if float(game_state.get("collision_cooldown", 0.0)) > 0.0:
             self.cmd_pub.publish(Twist())
             return
 
         fish_states = fish_states_from_json(self.fish_state_payload)
-        target = self._select_target(fish_states)
-        lidar = ObservationBuilder.preprocess_scan_ranges(
-            self.scan.ranges,
-            self.scan.range_min,
-            self.scan.range_max,
-            LIDAR_BIN_COUNT,
-        )
-        sectors = self._sector_proximities(lidar)
-        lidar_cluster = self._best_lidar_target_cluster()
-        target_bearing = 0.0 if target is None else angle_diff(
-            bearing_xy(self.shark.x, self.shark.y, target["x"], target["y"]),
-            self.shark.heading,
-        )
-        target_turn = self.k_target * target_bearing
-        lidar_turn = 0.0 if lidar_cluster is None else self.lidar_target_bias * lidar_cluster.center_angle
-        self._update_mode(sectors)
-        reactive_turn = self._braitenberg_turn(sectors)
-
-        cmd = Twist()
-        if target is None:
-            cmd.linear.x = self._effective_cruise_speed()
-            cmd.angular.z = clamp(lidar_turn + 0.7 * reactive_turn, -SHARK_MAX_ANGULAR_SPEED, SHARK_MAX_ANGULAR_SPEED)
-        elif self.mode == "avoid":
-            cmd = self._build_avoid_command(reactive_turn, sectors)
-        elif self.mode == "recover":
-            cmd = self._build_recover_command(target_turn, lidar_turn, reactive_turn, sectors)
-        else:
-            cmd = self._build_chase_command(target_turn, lidar_turn, reactive_turn, target_bearing, sectors)
-
-        now = self.get_clock().now()
-        if target is not None and (now - self.last_target_log_time).nanoseconds / 1e9 >= 1.0:
-            distance = distance_xy(self.shark.x, self.shark.y, target["x"], target["y"])
-            self.get_logger().info(
-                f"[AUTO] mode={self.mode} target={target['fish_id']} dist={distance:.2f} "
-                f"bearing={target_bearing:.2f} v={cmd.linear.x:.2f} w={cmd.angular.z:.2f}"
+        target = self._resolve_target(fish_states)
+        sectors = self._sector_proximities(
+            ObservationBuilder.preprocess_scan_ranges(
+                self.scan.ranges,
+                self.scan.range_min,
+                self.scan.range_max,
+                LIDAR_BIN_COUNT,
             )
-            self.last_target_log_time = now
+        )
+        wall_turn = self._wall_avoid_turn(sectors)
+        front_distance = self._sector_distance(sectors.center)
+        lidar_cluster = self._best_lidar_target_cluster()
+        lidar_turn = 0.0 if lidar_cluster is None else self.lidar_target_bias * lidar_cluster.center_angle
 
+        if target is None:
+            cmd = self._build_search_command(wall_turn, front_distance)
+        else:
+            target_bearing = angle_diff(
+                bearing_xy(self.shark.x, self.shark.y, target["x"], target["y"]),
+                self.shark.heading,
+            )
+            cmd = self._build_lock_command(target_bearing, lidar_turn, wall_turn, front_distance)
+
+        self._log_status(target, cmd)
         self.cmd_pub.publish(cmd)
 
-    def _select_target(self, fish_states: list[dict]) -> dict | None:
-        now = self._now_seconds()
-        active_by_id = {
-            fish["fish_id"]: fish
-            for fish in fish_states
-            if fish.get("active", False)
-        }
-
-        if self.locked_target_id in active_by_id and now < self.target_lock_until:
+    def _resolve_target(self, fish_states: list[dict]) -> dict | None:
+        active_by_id = {fish["fish_id"]: fish for fish in fish_states if fish.get("active", False)}
+        if self.locked_target_id in active_by_id:
+            if self.mode != "lock_and_chase":
+                self.mode = "lock_and_chase"
+                self.get_logger().info(f"[AUTO] mode transition: searching -> lock_and_chase ({self.locked_target_id})")
             return active_by_id[self.locked_target_id]
 
-        best = None
-        best_utility = -1.0
-        score_map = {"tuna": 10.0, "sardine": 3.0, "seaweed": 1.0}
-
-        for species in ("tuna", "sardine", "seaweed"):
-            active = [fish for fish in fish_states if fish.get("active", False) and fish.get("species") == species]
-            if not active:
-                continue
-            candidate = min(active, key=lambda fish: distance_xy(self.shark.x, self.shark.y, fish["x"], fish["y"]))
-            utility = score_map[species] / (distance_xy(self.shark.x, self.shark.y, candidate["x"], candidate["y"]) + 1e-3)
-            if utility > best_utility:
-                best = candidate
-                best_utility = utility
+        best = self._select_best_target(fish_states)
         if best is None:
+            if self.mode != "searching":
+                self.mode = "searching"
+                self.get_logger().info("[AUTO] mode transition: lock_and_chase -> searching")
             self.locked_target_id = ""
-            self.target_lock_until = 0.0
             return None
 
         self.locked_target_id = str(best["fish_id"])
-        self.target_lock_until = now + self.target_lock_seconds
+        if self.mode != "lock_and_chase":
+            self.mode = "lock_and_chase"
+            self.get_logger().info(f"[AUTO] mode transition: searching -> lock_and_chase ({self.locked_target_id})")
         return best
 
-    def _build_chase_command(
+    def _select_best_target(self, fish_states: list[dict]) -> dict | None:
+        best = None
+        best_utility = float("-inf")
+        score_map = {"tuna": 10.0, "sardine": 3.0, "seaweed": 1.0}
+        for fish in fish_states:
+            if not fish.get("active", False):
+                continue
+            distance = distance_xy(self.shark.x, self.shark.y, fish["x"], fish["y"])
+            utility = score_map.get(fish["species"], 0.0) / (distance + 1e-3)
+            if utility > best_utility:
+                best = fish
+                best_utility = utility
+        return best
+
+    def _build_search_command(self, wall_turn: float, front_distance: float) -> Twist:
+        cmd = Twist()
+        open_direction = 1.0 if wall_turn >= 0.0 else -1.0
+        if front_distance <= self._effective_wall_stop_distance():
+            cmd.linear.x = 0.0
+            cmd.angular.z = clamp(open_direction * max(self.search_turn_speed, 1.0), -SHARK_MAX_ANGULAR_SPEED, SHARK_MAX_ANGULAR_SPEED)
+            return cmd
+
+        speed_scale = clamp(front_distance / self._effective_wall_slow_distance(), 0.35, 1.0)
+        cmd.linear.x = clamp(self.search_forward_speed * speed_scale, 0.0, SHARK_MAX_LINEAR_SPEED)
+        cmd.angular.z = clamp(self.search_turn_speed + 0.8 * wall_turn, -SHARK_MAX_ANGULAR_SPEED, SHARK_MAX_ANGULAR_SPEED)
+        return cmd
+
+    def _build_lock_command(
         self,
-        target_turn: float,
-        lidar_turn: float,
-        reactive_turn: float,
         target_bearing: float,
-        sectors: SectorProximities,
-    ) -> Twist:
-        cmd = Twist()
-        cmd.angular.z = clamp(
-            target_turn + 0.55 * lidar_turn + 0.65 * reactive_turn,
-            -SHARK_MAX_ANGULAR_SPEED,
-            SHARK_MAX_ANGULAR_SPEED,
-        )
-        if self._sector_distance(sectors.center) <= self._effective_turn_in_place_distance():
-            cmd.linear.x = 0.0
-            return cmd
-
-        heading_factor = clamp(1.0 - 0.42 * abs(target_bearing), 0.20, 1.0)
-        clearance_factor = clamp(1.0 - 0.85 * sectors.obstacle_strength, 0.15, 1.0)
-        max_speed = self._effective_max_speed()
-        cmd.linear.x = clamp(max_speed * heading_factor * clearance_factor, 0.0, max_speed)
-        return cmd
-
-    def _build_avoid_command(self, reactive_turn: float, sectors: SectorProximities) -> Twist:
-        cmd = Twist()
-        cmd.angular.z = clamp(
-            self.avoid_turn_speed * self.avoid_direction + 0.7 * reactive_turn,
-            -SHARK_MAX_ANGULAR_SPEED,
-            SHARK_MAX_ANGULAR_SPEED,
-        )
-        center_distance = self._sector_distance(sectors.center)
-        if center_distance <= max(0.18, 0.7 * self._effective_turn_in_place_distance()):
-            cmd.linear.x = 0.0
-            return cmd
-        cmd.linear.x = clamp(
-            self._effective_avoid_forward_speed() * clamp(center_distance / self._effective_avoid_enter_distance(), 0.35, 1.0),
-            0.04,
-            self._effective_avoid_forward_speed(),
-        )
-        return cmd
-
-    def _build_recover_command(
-        self,
-        target_turn: float,
         lidar_turn: float,
-        reactive_turn: float,
-        sectors: SectorProximities,
+        wall_turn: float,
+        front_distance: float,
     ) -> Twist:
         cmd = Twist()
+        open_direction = 1.0 if wall_turn >= 0.0 else -1.0
         cmd.angular.z = clamp(
-            0.45 * target_turn + 0.45 * lidar_turn + 0.5 * reactive_turn + self.recover_turn_speed * self.avoid_direction,
+            self.k_target * target_bearing + 0.45 * lidar_turn + wall_turn,
             -SHARK_MAX_ANGULAR_SPEED,
             SHARK_MAX_ANGULAR_SPEED,
         )
-        max_speed = self._effective_max_speed()
-        cmd.linear.x = clamp(
-            0.6 * self._effective_cruise_speed() * (1.0 - 0.5 * sectors.obstacle_strength),
-            0.08,
-            max_speed,
-        )
+        if front_distance <= self._effective_wall_stop_distance():
+            cmd.linear.x = 0.0
+            cmd.angular.z = clamp(cmd.angular.z + 0.6 * open_direction, -SHARK_MAX_ANGULAR_SPEED, SHARK_MAX_ANGULAR_SPEED)
+            return cmd
+
+        heading_scale = clamp(1.0 - 0.45 * abs(target_bearing), 0.25, 1.0)
+        clearance_scale = clamp(front_distance / self._effective_wall_slow_distance(), 0.35, 1.0)
+        max_speed = clamp(self.lock_linear_speed * self._speed_scale(), 0.0, SHARK_MAX_LINEAR_SPEED)
+        cmd.linear.x = clamp(max_speed * heading_scale * clearance_scale, self.lock_min_linear_speed, max_speed)
         return cmd
 
-    def _update_mode(self, sectors: SectorProximities) -> None:
-        now = self._now_seconds()
-        center_distance = self._sector_distance(sectors.center)
-        obstacle_distance = self._sector_distance(sectors.obstacle_strength)
-        side_distance = min(self._sector_distance(sectors.left), self._sector_distance(sectors.right))
-        if self.mode == "avoid":
-            if now >= self.avoid_until and (
-                center_distance >= self._effective_avoid_exit_distance()
-                and side_distance >= self._effective_side_clear_distance()
-            ):
-                self.mode = "recover"
-                self.recover_until = now + self.recover_seconds
-                self.get_logger().info("[AUTO] mode transition: avoid -> recover")
-            return
-
-        if self.mode == "recover":
-            if obstacle_distance <= self._effective_avoid_enter_distance():
-                self._enter_avoid_mode(sectors, now)
-            elif now >= self.recover_until:
-                self.mode = "chase"
-                self.get_logger().info("[AUTO] mode transition: recover -> chase")
-            return
-
-        if obstacle_distance <= self._effective_avoid_enter_distance():
-            self._enter_avoid_mode(sectors, now)
-
-    def _enter_avoid_mode(self, sectors: SectorProximities, now: float) -> None:
-        self.mode = "avoid"
-        right_pressure = sectors.right + 0.5 * sectors.far_right
-        left_pressure = sectors.left + 0.5 * sectors.far_left
-        self.avoid_direction = 1.0 if right_pressure >= left_pressure else -1.0
-        self.avoid_until = now + self.avoid_commit_seconds
-        direction = "left" if self.avoid_direction > 0.0 else "right"
-        self.get_logger().info(f"[AUTO] mode transition: chase/recover -> avoid ({direction})")
-
-    def _braitenberg_turn(self, sectors: SectorProximities) -> float:
-        center_push = self.k_center_push * self.avoid_direction * sectors.center if self.mode != "chase" else 0.0
-        return (
-            self.k_avoid * (sectors.right - sectors.left)
-            + self.k_avoid_far * (sectors.far_right - sectors.far_left)
-            + center_push
+    def _wall_avoid_turn(self, sectors: SectorProximities) -> float:
+        return self.k_wall_avoid * (
+            (sectors.right - sectors.left) + 0.55 * (sectors.far_right - sectors.far_left)
         )
 
     def _sector_proximities(self, lidar: list[float]) -> SectorProximities:
@@ -353,47 +250,22 @@ class SharkAutoController(Node):
             return 0.0
         return float(max(values))
 
-    def _now_seconds(self) -> float:
-        return self.get_clock().now().nanoseconds / 1e9
-
-    def _effective_behavior_caution(self) -> float:
-        return clamp(self.behavior_caution, 0.6, 1.6)
-
-    def _effective_max_speed(self) -> float:
-        caution = self._effective_behavior_caution()
-        speed_scale = self.max_speed_scale * (1.10 - 0.30 * (caution - 1.0))
-        return SHARK_MAX_LINEAR_SPEED * clamp(speed_scale, 0.55, 1.10)
-
-    def _effective_cruise_speed(self) -> float:
-        caution = self._effective_behavior_caution()
-        scale = 1.08 - 0.28 * (caution - 1.0)
-        return clamp(self.cruise_speed * scale, 0.10, SHARK_MAX_LINEAR_SPEED)
-
-    def _effective_avoid_forward_speed(self) -> float:
-        caution = self._effective_behavior_caution()
-        scale = 1.05 - 0.35 * (caution - 1.0)
-        return clamp(self.avoid_forward_speed * scale, 0.04, 0.20)
-
-    def _effective_turn_in_place_distance(self) -> float:
-        caution = self._effective_behavior_caution()
-        return clamp(self.turn_in_place_distance + 0.12 * (caution - 1.0), 0.22, 0.55)
-
-    def _effective_avoid_enter_distance(self) -> float:
-        caution = self._effective_behavior_caution()
-        return clamp(self.avoid_enter_distance + 0.25 * (caution - 1.0), 0.55, 1.20)
-
-    def _effective_avoid_exit_distance(self) -> float:
-        caution = self._effective_behavior_caution()
-        return clamp(self.avoid_exit_distance + 0.20 * (caution - 1.0), 0.70, 1.30)
-
-    def _effective_side_clear_distance(self) -> float:
-        caution = self._effective_behavior_caution()
-        return clamp(self.side_clear_distance + 0.16 * (caution - 1.0), 0.50, 1.10)
-
     def _sector_distance(self, proximity: float) -> float:
         if self.scan is None:
             return float("inf")
         return max(self.scan.range_min, (1.0 - proximity) * self.scan.range_max)
+
+    def _speed_scale(self) -> float:
+        caution = clamp(self.behavior_caution, 0.6, 1.4)
+        return clamp(1.15 - 0.18 * (caution - 1.0), 0.85, 1.20)
+
+    def _effective_wall_stop_distance(self) -> float:
+        caution = clamp(self.behavior_caution, 0.6, 1.4)
+        return clamp(self.wall_stop_distance + 0.08 * (caution - 1.0), 0.18, 0.45)
+
+    def _effective_wall_slow_distance(self) -> float:
+        caution = clamp(self.behavior_caution, 0.6, 1.4)
+        return clamp(self.wall_slow_distance + 0.15 * (caution - 1.0), 0.45, 1.20)
 
     def _best_lidar_target_cluster(self) -> LidarCluster | None:
         if self.scan is None:
@@ -404,8 +276,8 @@ class SharkAutoController(Node):
         for cluster in clusters:
             score = (
                 2.2 / max(cluster.mean_range, 0.15)
-                - 0.9 * abs(cluster.center_angle)
-                - 0.7 * cluster.physical_width
+                - 0.8 * abs(cluster.center_angle)
+                - 0.6 * cluster.physical_width
             )
             if score > best_score:
                 best_score = score
@@ -430,8 +302,7 @@ class SharkAutoController(Node):
         clusters: list[list[tuple[int, float, float]]] = []
         current_cluster = [points[0]]
         for point in points[1:]:
-            prev_point = current_cluster[-1]
-            if self._cluster_break(scan.angle_increment, prev_point, point):
+            if self._cluster_break(scan.angle_increment, current_cluster[-1], point):
                 clusters.append(current_cluster)
                 current_cluster = [point]
             else:
@@ -443,9 +314,9 @@ class SharkAutoController(Node):
             if not (self.lidar_cluster_min_beams <= len(cluster_points) <= self.lidar_cluster_max_beams):
                 continue
             ranges = [point[1] for point in cluster_points]
+            mean_range = sum(ranges) / len(ranges)
             start_angle = cluster_points[0][2]
             end_angle = cluster_points[-1][2]
-            mean_range = sum(ranges) / len(ranges)
             angular_span = abs(end_angle - start_angle)
             physical_width = 2.0 * mean_range * math.sin(angular_span / 2.0)
             if physical_width > self.lidar_cluster_max_width:
@@ -479,6 +350,22 @@ class SharkAutoController(Node):
             - 2.0 * prev_range * curr_range * math.cos(angle_gap)
         )
         return euclidean_gap > self.lidar_cluster_jump_distance
+
+    def _log_status(self, target: dict | None, cmd: Twist) -> None:
+        now = self.get_clock().now()
+        if (now - self.last_log_time).nanoseconds / 1e9 < 1.0:
+            return
+        if target is None:
+            self.get_logger().info(
+                f"[AUTO] mode={self.mode} target=none v={cmd.linear.x:.2f} w={cmd.angular.z:.2f}"
+            )
+        else:
+            distance = distance_xy(self.shark.x, self.shark.y, target["x"], target["y"])
+            self.get_logger().info(
+                f"[AUTO] mode={self.mode} target={target['fish_id']} dist={distance:.2f} "
+                f"v={cmd.linear.x:.2f} w={cmd.angular.z:.2f}"
+            )
+        self.last_log_time = now
 
 
 def main() -> None:

@@ -30,6 +30,12 @@ def generate_launch_description() -> LaunchDescription:
                 default_value="1.0",
                 description="Higher values make the shark avoid obstacles earlier and drive more conservatively.",
             ),
+            DeclareLaunchArgument("search_forward_speed", default_value="0.28"),
+            DeclareLaunchArgument("search_turn_speed", default_value="0.85"),
+            DeclareLaunchArgument("lock_linear_speed", default_value="0.55"),
+            DeclareLaunchArgument("lidar_target_bias", default_value="0.9"),
+            DeclareLaunchArgument("tuna_speed_scale", default_value="0.35"),
+            DeclareLaunchArgument("sardine_speed_scale", default_value="0.18"),
             SetEnvironmentVariable(
                 "GZ_SIM_RESOURCE_PATH",
                 [
@@ -73,6 +79,9 @@ def generate_launch_description() -> LaunchDescription:
                         "mode": "auto_play",
                         "auto_reset": False,
                         "episode_duration": 9999.0,
+                        "respawn_caught_fish": False,
+                        "tuna_speed_scale": LaunchConfiguration("tuna_speed_scale"),
+                        "sardine_speed_scale": LaunchConfiguration("sardine_speed_scale"),
                         "use_sim_time": True,
                     },
                 ],
@@ -88,7 +97,17 @@ def generate_launch_description() -> LaunchDescription:
                 package="enpm690_hw3_phase2",
                 executable="shark_auto_controller",
                 output="screen",
-                parameters=[params, {"use_sim_time": True, "behavior_caution": LaunchConfiguration("behavior_caution")}],
+                parameters=[
+                    params,
+                    {
+                        "use_sim_time": True,
+                        "behavior_caution": LaunchConfiguration("behavior_caution"),
+                        "search_forward_speed": LaunchConfiguration("search_forward_speed"),
+                        "search_turn_speed": LaunchConfiguration("search_turn_speed"),
+                        "lock_linear_speed": LaunchConfiguration("lock_linear_speed"),
+                        "lidar_target_bias": LaunchConfiguration("lidar_target_bias"),
+                    },
+                ],
             ),
             Node(
                 package="enpm690_hw3_phase2",
