@@ -4,7 +4,7 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from simulation_interfaces.msg import EntityFilters, EntityState, Resource
-from simulation_interfaces.srv import GetEntities, SetEntityState, SpawnEntity
+from simulation_interfaces.srv import DeleteEntity, GetEntities, SetEntityState, SpawnEntity
 
 
 def fish_model_paths() -> dict[str, Path]:
@@ -50,6 +50,20 @@ def make_spawn_entity_request(entity_name: str, model_path: Path, x: float, y: f
     request.initial_pose.pose.position.y = y
     request.initial_pose.pose.position.z = z
     request.initial_pose.pose.orientation.w = 1.0
+    return request
+
+
+def make_delete_entity_request(entity_name: str) -> DeleteEntity.Request:
+    request = DeleteEntity.Request()
+    if hasattr(request, "entity"):
+        request.entity = entity_name
+    elif hasattr(request, "name"):
+        request.name = entity_name
+    else:
+        raise AttributeError(
+            "DeleteEntity request does not expose a supported name field. "
+            "Expected one of: entity, name."
+        )
     return request
 
 
