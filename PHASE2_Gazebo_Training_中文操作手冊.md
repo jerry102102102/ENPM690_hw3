@@ -108,6 +108,63 @@ source scripts/dev_env.sh
 - `gymnasium` import 是否成功
 - `stable_baselines3` import 是否成功
 
+## 4.2 正確使用方式
+
+最重要的原則只有一個：
+
+- `python -m enpm690_hw3_phase2.train_ppo ...` 不會自動啟動 Gazebo training stack，除非你有加 `--launch-stack`
+
+也就是說，訓練有兩種正確跑法，而且你必須擇一：
+
+### 方式 A：先手動啟動 training stack，再跑 training
+
+Terminal 1：
+
+```bash
+cd /你的路徑/ENPM690_hw3
+source scripts/dev_env.sh
+ros2 launch enpm690_hw3_phase2 phase2_train.launch.py
+```
+
+Terminal 2：
+
+```bash
+cd /你的路徑/ENPM690_hw3
+source scripts/dev_env.sh
+python -m enpm690_hw3_phase2.train_ppo --timesteps 20000 --output-dir artifacts/phase2_ppo
+```
+
+### 方式 B：讓 training script 自己啟動 stack
+
+```bash
+cd /你的路徑/ENPM690_hw3
+source scripts/dev_env.sh
+python -m enpm690_hw3_phase2.train_ppo --launch-stack --stack-timeout 90 --timesteps 20000 --output-dir artifacts/phase2_ppo
+```
+
+如果你沒有先手動啟動 `phase2_train.launch.py`，又沒有加 `--launch-stack`，那麼 `train_ppo` 在 `check_env()` 或 `reset()` 階段很可能會卡在：
+
+- 等不到新的 `/scan`
+- 等不到新的 `/odom`
+- 或 timeout 在 Gazebo simulation service
+
+這不是 PPO 邏輯錯誤，而是 training backend 沒有先準備好。
+
+### Evaluation 的正確跑法
+
+evaluation 也同樣遵守這個規則：
+
+- 你可以先手動起 stack，再跑 `python -m enpm690_hw3_phase2.eval_policy ...`
+- 或者直接在 eval 指令加 `--launch-stack`
+
+最常用 headless eval：
+
+```bash
+cd /你的路徑/ENPM690_hw3
+source scripts/dev_env.sh
+python -m enpm690_hw3_phase2.eval_policy --launch-stack --headless --model artifacts/phase2_ppo/ppo_shark_hunt.zip --episodes 5
+```
+
 ## 5. Phase 2 Teleop Play
 
 這是人工操作「玩一局」模式，保留 GUI 和 RViz。
