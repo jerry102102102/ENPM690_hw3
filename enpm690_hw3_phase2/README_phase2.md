@@ -11,6 +11,7 @@ This package adds the Phase 2 shark-hunt scenario on top of the working Phase 1 
 - RViz marker visualization for fish and HUD text
 - Gymnasium-compatible shark hunting environment
 - PPO training and evaluation scripts
+- Gazebo-backed training environment for the default RL path
 
 ## Package layout
 
@@ -54,6 +55,9 @@ ros2 launch enpm690_hw3_phase2 phase2_play_auto.launch.py
 
 ## Training
 
+Default training now uses the Gazebo-backed environment.
+The old Python-only environment remains available only as a debug fallback.
+
 Install Python RL dependencies first:
 
 ```bash
@@ -63,11 +67,11 @@ pip install gymnasium stable-baselines3
 Train:
 
 ```bash
-ros2 run enpm690_hw3_phase2 train_ppo -- --timesteps 20000 --output-dir artifacts/phase2_ppo
+ros2 run enpm690_hw3_phase2 train_ppo -- --launch-stack --timesteps 20000 --output-dir artifacts/phase2_ppo
 ```
 
 Evaluate:
 
 ```bash
-ros2 run enpm690_hw3_phase2 eval_policy -- --model artifacts/phase2_ppo/ppo_shark_hunt.zip --episodes 5
+ros2 run enpm690_hw3_phase2 eval_policy -- --launch-stack --headless --model artifacts/phase2_ppo/ppo_shark_hunt.zip --episodes 5
 ```

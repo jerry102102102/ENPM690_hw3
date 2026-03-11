@@ -42,18 +42,6 @@ def generate_launch_description() -> LaunchDescription:
                 output="screen",
                 parameters=[{"use_sim_time": True}],
             ),
-            Node(
-                package="enpm690_hw3_phase2",
-                executable="game_manager",
-                output="screen",
-                parameters=[params, {"mode": "eval_demo", "use_sim_time": True}],
-            ),
-            Node(
-                package="enpm690_hw3_phase2",
-                executable="marker_publisher",
-                output="screen",
-                parameters=[params, {"use_sim_time": True}],
-            ),
             TimerAction(period=3.0, actions=[spawn]),
             Node(
                 package="rviz2",

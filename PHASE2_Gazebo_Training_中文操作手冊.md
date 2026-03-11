@@ -1,0 +1,479 @@
+# ENPM690 HW3 Phase 2 Gazebo-backed Training 中文操作手冊
+
+這份文件整理 Phase 2 在 ROS 2 Jazzy + Gazebo Harmonic 環境下的操作方式，重點是：
+
+- Phase 2 teleop play
+- Phase 2 baseline auto play
+- Phase 2 Gazebo-backed training
+- Phase 2 Gazebo-backed evaluation
+
+這份手冊假設你已經有：
+
+- Ubuntu Linux
+- ROS 2 Jazzy
+- Gazebo Harmonic
+- 可以正常執行 `ros2`、`colcon`
+
+## 1. 安裝系統套件
+
+先更新 apt：
+
+```bash
+sudo apt update
+```
+
+安裝 ROS / Gazebo 相關套件：
+
+```bash
+sudo apt install -y \
+  ros-jazzy-desktop \
+  ros-jazzy-ros-gz-sim \
+  ros-jazzy-ros-gz-bridge \
+  ros-jazzy-robot-state-publisher \
+  ros-jazzy-rviz2 \
+  ros-jazzy-simulation-interfaces \
+  python3-colcon-common-extensions
+```
+
+如果你之後要做 PPO training，還需要 Python 套件：
+
+```bash
+pip install gymnasium stable-baselines3
+```
+
+## 2. 進入工作區
+
+```bash
+cd /你的路徑/ENPM690_hw3
+```
+
+## 3. 載入 ROS 2 環境
+
+每個新 terminal 都先執行：
+
+```bash
+source /opt/ros/jazzy/setup.bash
+```
+
+## 4. 建置 Phase 1 + Phase 2
+
+因為 Phase 2 會重用 Phase 1 的 robot / launch / topic flow，建議一起 build：
+
+```bash
+cd /你的路徑/ENPM690_hw3
+source /opt/ros/jazzy/setup.bash
+colcon build --packages-select enpm690_hw3_phase1 enpm690_hw3_phase2
+source install/setup.bash
+```
+
+## 5. Phase 2 Teleop Play
+
+這是人工操作「玩一局」模式，保留 GUI 和 RViz。
+
+Terminal 1：
+
+```bash
+cd /你的路徑/ENPM690_hw3
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 launch enpm690_hw3_phase2 phase2_play_teleop.launch.py
+```
+
+Terminal 2：
+
+```bash
+cd /你的路徑/ENPM690_hw3
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 run enpm690_hw3_phase1 keyboard_teleop --ros-args -r /cmd_vel:=/cmd_vel_input
+```
+
+說明：
+
+- keyboard teleop 不是直接發到 `/cmd_vel`
+- 而是先發到 `/cmd_vel_input`
+- Phase 2 game manager 會做 scoring / timer / command gating
+
+## 6. Phase 2 Baseline Auto Play
+
+這是 rule-based shark baseline 自動玩一局模式。
+
+```bash
+cd /你的路徑/ENPM690_hw3
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 launch enpm690_hw3_phase2 phase2_play_auto.launch.py
+```
+
+這個模式會啟動：
+
+- Gazebo GUI
+- RViz
+- shark robot
+- fish marker / game state
+- baseline auto controller
+
+## 7. Phase 2 Headless Training Stack
+
+這是只啟動 Gazebo training backend 的 stack。
+不會啟動 GUI、RViz、teleop logger，也不會啟動 play-mode game manager。
+
+```bash
+cd /你的路徑/ENPM690_hw3
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 launch enpm690_hw3_phase2 phase2_train.launch.py
+```
+
+這個 launch 主要包含：
+
+- Gazebo server-only
+- Phase 2 world
+- robot spawn
+- ROS <-> Gazebo bridge
+- robot_state_publisher
+- odom TF support
+
+## 8. 檢查 Training Stack 是否真的起來
+
+在另一個 terminal：
+
+```bash
+cd /你的路徑/ENPM690_hw3
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 topic list
+```
+
+應該至少看到：
+
+- `/scan`
+- `/odom`
+- `/clock`
+- `/cmd_vel`
+
+檢查 `/scan`：
+
+```bash
+ros2 topic echo /scan
+```
+
+檢查 `/odom`：
+
+```bash
+ros2 topic echo /odom
+```
+
+檢查 Gazebo simulation service：
+
+```bash
+ros2 service list | grep gzserver
+```
+
+你應該重點確認至少有這些：
+
+- `/gzserver/reset_simulation`
+- `/gzserver/step_simulation`
+- `/gzserver/get_simulation_state`
+- `/gzserver/set_simulation_state`
+- `/gzserver/spawn_entity`
+- `/gzserver/delete_entity`
+- `/gzserver/get_entities`
+- `/gzserver/set_entity_state`
+
+## 9. 用 Gazebo-backed Env 直接訓練
+
+### 方式 A：先手動啟動 training stack，再跑 PPO
+
+先開一個 terminal 啟動 stack：
+
+```bash
+cd /你的路徑/ENPM690_hw3
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 launch enpm690_hw3_phase2 phase2_train.launch.py
+```
+
+再開另一個 terminal 跑 training：
+
+```bash
+cd /你的路徑/ENPM690_hw3
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 run enpm690_hw3_phase2 train_ppo -- --timesteps 20000 --output-dir artifacts/phase2_ppo
+```
+
+### 方式 B：讓 train_ppo.py 自己啟動 training stack
+
+```bash
+cd /你的路徑/ENPM690_hw3
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 run enpm690_hw3_phase2 train_ppo -- --launch-stack --timesteps 20000 --output-dir artifacts/phase2_ppo
+```
+
+## 10. Training 常用參數
+
+最常用：
+
+```bash
+ros2 run enpm690_hw3_phase2 train_ppo -- --launch-stack --timesteps 20000 --output-dir artifacts/phase2_ppo
+```
+
+如果你要改 timeout：
+
+```bash
+ros2 run enpm690_hw3_phase2 train_ppo -- --launch-stack --stack-timeout 60 --timesteps 20000
+```
+
+如果你要明確指定 headless：
+
+```bash
+ros2 run enpm690_hw3_phase2 train_ppo -- --launch-stack --headless --timesteps 20000
+```
+
+如果你只是 debug，不想走真 Gazebo env，才用 fallback logical env：
+
+```bash
+ros2 run enpm690_hw3_phase2 train_ppo -- --use-logical-env --timesteps 2000
+```
+
+注意：
+
+- `--use-logical-env` 只是 debug fallback
+- 正式 Phase 2 training 應該使用 Gazebo-backed env
+
+## 11. Evaluation
+
+### Headless evaluation
+
+```bash
+cd /你的路徑/ENPM690_hw3
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 run enpm690_hw3_phase2 eval_policy -- --launch-stack --headless --model artifacts/phase2_ppo/ppo_shark_hunt.zip --episodes 5
+```
+
+### Visible evaluation
+
+這會啟 visible Gazebo stack，讓 policy 實際玩一局：
+
+```bash
+cd /你的路徑/ENPM690_hw3
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 run enpm690_hw3_phase2 eval_policy -- --launch-stack --no-headless --model artifacts/phase2_ppo/ppo_shark_hunt.zip --episodes 3
+```
+
+## 12. 直接啟動 Visible Eval Stack
+
+如果你只想先看 visible evaluation stack 能不能正常起來：
+
+```bash
+cd /你的路徑/ENPM690_hw3
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 launch enpm690_hw3_phase2 phase2_eval.launch.py
+```
+
+這個 launch 會起：
+
+- visible Gazebo
+- shark robot
+- bridge
+- robot_state_publisher
+- odom TF support
+- RViz
+
+## 13. 訓練輸出檔案
+
+預設輸出會在：
+
+```bash
+artifacts/phase2_ppo/
+```
+
+通常你應該會看到：
+
+- `ppo_shark_hunt.zip`
+- `train_summary.json`
+- `tensorboard/`
+
+## 14. 評估輸出檔案
+
+預設會寫到：
+
+```bash
+artifacts/phase2_eval_summary.json
+```
+
+## 15. 檢查 PPO 模型是否真的產生
+
+```bash
+ls artifacts/phase2_ppo
+```
+
+## 16. 檢查 fish entity / Gazebo entity
+
+如果你想確認 fish entity 有沒有真的被 spawn 到 Gazebo：
+
+```bash
+ros2 service list | grep entity
+```
+
+如果你的系統有對應 CLI 或 service call helper，也可以查 `/gzserver/get_entities`。
+
+至少在程式設計上，Gazebo-backed env 會用這些 service：
+
+- spawn fish entity
+- set fish entity state
+- reset simulation
+- step simulation
+
+## 17. 最小 Training 驗證流程
+
+建議你第一次回去驗證照這個順序：
+
+1. 先確認 Phase 1 還能跑
+2. 再確認 `phase2_play_teleop.launch.py` 還能玩
+3. 再確認 `phase2_play_auto.launch.py` 還能自動玩
+4. 再確認 `phase2_train.launch.py` 起得來
+5. 用 `ros2 topic echo /scan` 和 `/odom` 確認 training stack 有資料
+6. 最後再跑 `train_ppo`
+
+最小命令如下：
+
+```bash
+cd /你的路徑/ENPM690_hw3
+source /opt/ros/jazzy/setup.bash
+colcon build --packages-select enpm690_hw3_phase1 enpm690_hw3_phase2
+source install/setup.bash
+ros2 launch enpm690_hw3_phase2 phase2_train.launch.py
+```
+
+另開一個 terminal：
+
+```bash
+cd /你的路徑/ENPM690_hw3
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 topic echo /scan
+```
+
+再開第三個 terminal：
+
+```bash
+cd /你的路徑/ENPM690_hw3
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 run enpm690_hw3_phase2 train_ppo -- --timesteps 20000 --output-dir artifacts/phase2_ppo
+```
+
+## 18. 常見問題優先檢查
+
+### 1. `ros2 launch ... phase2_train.launch.py` 起不來
+
+先檢查：
+
+```bash
+ros2 pkg list | grep enpm690
+ros2 pkg list | grep ros_gz
+```
+
+### 2. 沒有 `/scan` 或 `/odom`
+
+檢查：
+
+```bash
+ros2 topic list
+ros2 node list
+```
+
+通常優先看：
+
+- bridge 有沒有起來
+- robot 有沒有真的 spawn
+- Gazebo server 有沒有正常啟動
+
+### 3. training script 說 service not ready
+
+先檢查：
+
+```bash
+ros2 service list | grep gzserver
+```
+
+如果 service 還沒全部起來，可以把 timeout 拉長：
+
+```bash
+ros2 run enpm690_hw3_phase2 train_ppo -- --launch-stack --stack-timeout 90 --timesteps 20000
+```
+
+### 4. `simulation_interfaces` 找不到
+
+安裝：
+
+```bash
+sudo apt install -y ros-jazzy-simulation-interfaces
+```
+
+### 5. Python RL 套件找不到
+
+```bash
+pip install gymnasium stable-baselines3
+```
+
+## 19. 你最常會直接用到的指令
+
+### Build
+
+```bash
+cd /你的路徑/ENPM690_hw3
+source /opt/ros/jazzy/setup.bash
+colcon build --packages-select enpm690_hw3_phase1 enpm690_hw3_phase2
+source install/setup.bash
+```
+
+### Teleop play
+
+```bash
+ros2 launch enpm690_hw3_phase2 phase2_play_teleop.launch.py
+```
+
+### Keyboard teleop
+
+```bash
+ros2 run enpm690_hw3_phase1 keyboard_teleop --ros-args -r /cmd_vel:=/cmd_vel_input
+```
+
+### Auto play
+
+```bash
+ros2 launch enpm690_hw3_phase2 phase2_play_auto.launch.py
+```
+
+### Training stack
+
+```bash
+ros2 launch enpm690_hw3_phase2 phase2_train.launch.py
+```
+
+### Gazebo-backed PPO train
+
+```bash
+ros2 run enpm690_hw3_phase2 train_ppo -- --launch-stack --timesteps 20000 --output-dir artifacts/phase2_ppo
+```
+
+### Gazebo-backed headless eval
+
+```bash
+ros2 run enpm690_hw3_phase2 eval_policy -- --launch-stack --headless --model artifacts/phase2_ppo/ppo_shark_hunt.zip --episodes 5
+```
+
+### Gazebo-backed visible eval
+
+```bash
+ros2 run enpm690_hw3_phase2 eval_policy -- --launch-stack --no-headless --model artifacts/phase2_ppo/ppo_shark_hunt.zip --episodes 3
+```
+
+如果你要，我下一步可以再幫你補一份更短的「Phase 2 demo / train 一頁版指令卡」，只保留最必要的命令。 

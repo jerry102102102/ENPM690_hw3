@@ -8,10 +8,11 @@ from pathlib import Path
 
 import numpy as np
 
-from .gym_env import SharkHuntEnv
+from .gazebo_env import GazeboSharkHuntEnv
+from .logical_env import SharkHuntLogicalEnv
 
 
-def _run_random_smoke(env: SharkHuntEnv, steps: int = 20) -> None:
+def _run_random_smoke(env, steps: int = 20) -> None:
     observation, _ = env.reset()
     for _ in range(steps):
         action = env.action_space.sample()
@@ -20,7 +21,7 @@ def _run_random_smoke(env: SharkHuntEnv, steps: int = 20) -> None:
             observation, _ = env.reset()
 
 
-def _run_scripted_smoke(env: SharkHuntEnv, steps: int = 20) -> None:
+def _run_scripted_smoke(env, steps: int = 20) -> None:
     observation, _ = env.reset()
     scripted_action = np.array([0.5, 0.0], dtype=np.float32)
     for _ in range(steps):
@@ -33,6 +34,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Train PPO on the Phase 2 shark hunt environment.")
     parser.add_argument("--timesteps", type=int, default=20_000)
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts/phase2_ppo"))
+    parser.add_argument("--launch-stack", action="store_true")
+    parser.add_argument("--stack-timeout", type=float, default=45.0)
+    parser.add_argument("--headless", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--use-logical-env", action="store_true")
     args = parser.parse_args()
 
     try:
@@ -44,16 +49,36 @@ def main() -> None:
         ) from exc
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    env = SharkHuntEnv()
-    check_env(env, warn=True)
-    _run_random_smoke(env)
-    _run_scripted_smoke(env)
+    env = None
+    try:
+        if args.use_logical_env:
+            env = SharkHuntLogicalEnv()
+            env_name = "logical"
+        else:
+            env = GazeboSharkHuntEnv(
+                launch_stack=args.launch_stack,
+                stack_timeout=args.stack_timeout,
+                headless=args.headless,
+                enable_fish_visuals=False,
+            )
+            env_name = "gazebo"
+        check_env(env, warn=True)
+        _run_random_smoke(env)
+        _run_scripted_smoke(env)
 
-    model = PPO("MlpPolicy", env, verbose=1, tensorboard_log=str(args.output_dir / "tensorboard"))
-    model.learn(total_timesteps=args.timesteps)
-    model.save(str(args.output_dir / "ppo_shark_hunt"))
+        model = PPO("MlpPolicy", env, verbose=1, tensorboard_log=str(args.output_dir / "tensorboard"))
+        model.learn(total_timesteps=args.timesteps)
+        model.save(str(args.output_dir / "ppo_shark_hunt"))
 
-    summary = {"timesteps": args.timesteps, "model_path": str(args.output_dir / "ppo_shark_hunt.zip")}
+        summary = {
+            "timesteps": args.timesteps,
+            "model_path": str(args.output_dir / "ppo_shark_hunt.zip"),
+            "environment": env_name,
+        }
+    finally:
+        if env is not None:
+            env.close()
+
     (args.output_dir / "train_summary.json").write_text(json.dumps(summary, indent=2))
     print(json.dumps(summary, indent=2))
 

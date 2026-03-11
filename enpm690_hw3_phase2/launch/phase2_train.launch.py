@@ -28,8 +28,8 @@ def generate_launch_description() -> LaunchDescription:
                 [str(phase2_share / "models"), ":", str(phase2_share / "worlds"), ":", EnvironmentVariable("GZ_SIM_RESOURCE_PATH", default_value="")],
             ),
             IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(str(ros_gz_sim_share / "launch" / "gz_sim.launch.py")),
-                launch_arguments={"gz_args": f"-s -r -v 3 {world}"}.items(),
+                PythonLaunchDescriptionSource(str(ros_gz_sim_share / "launch" / "gz_server.launch.py")),
+                launch_arguments={"world_sdf_file": world}.items(),
             ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(str(phase1_share / "launch" / "bridge.launch.py")),
@@ -45,12 +45,6 @@ def generate_launch_description() -> LaunchDescription:
                 executable="odom_tf_broadcaster",
                 output="screen",
                 parameters=[{"use_sim_time": True}],
-            ),
-            Node(
-                package="enpm690_hw3_phase2",
-                executable="game_manager",
-                output="screen",
-                parameters=[params, {"mode": "train_headless", "use_sim_time": True}],
             ),
             TimerAction(period=3.0, actions=[spawn]),
         ]
