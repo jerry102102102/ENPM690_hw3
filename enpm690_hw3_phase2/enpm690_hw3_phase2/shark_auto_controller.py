@@ -30,10 +30,8 @@ class SharkAutoController(Node):
         self.declare_parameter("k_target", 1.6)
         self.declare_parameter("k_avoid", 1.4)
         self.declare_parameter("control_hz", 10.0)
-        self.declare_parameter("turn_in_place_proximity", 0.90)
-        self.declare_parameter("hard_stop_proximity", 0.965)
+        self.declare_parameter("turn_in_place_proximity", 0.72)
         self.declare_parameter("cruise_speed", 0.22)
-        self.declare_parameter("crawl_speed", 0.08)
         self.declare_parameter("max_speed_scale", 1.0)
 
         self.cmd_topic = str(self.get_parameter("cmd_topic").value)
@@ -41,9 +39,7 @@ class SharkAutoController(Node):
         self.k_avoid = float(self.get_parameter("k_avoid").value)
         control_hz = float(self.get_parameter("control_hz").value)
         self.turn_in_place_proximity = float(self.get_parameter("turn_in_place_proximity").value)
-        self.hard_stop_proximity = float(self.get_parameter("hard_stop_proximity").value)
         self.cruise_speed = float(self.get_parameter("cruise_speed").value)
-        self.crawl_speed = float(self.get_parameter("crawl_speed").value)
         self.max_speed_scale = float(self.get_parameter("max_speed_scale").value)
 
         self.shark = SharkState()
@@ -109,15 +105,10 @@ class SharkAutoController(Node):
             bearing = angle_diff(bearing_xy(self.shark.x, self.shark.y, target["x"], target["y"]), self.shark.heading)
             target_turn = self.k_target * bearing
             avoid_turn = self.k_avoid * (right_prox - left_prox)
-            turn_command = target_turn + avoid_turn
-            if center_prox >= self.turn_in_place_proximity and abs(right_prox - left_prox) < 0.05:
-                turn_command += 0.6 if bearing >= 0.0 else -0.6
-            cmd.angular.z = clamp(turn_command, -SHARK_MAX_ANGULAR_SPEED, SHARK_MAX_ANGULAR_SPEED)
+            cmd.angular.z = clamp(target_turn + avoid_turn, -SHARK_MAX_ANGULAR_SPEED, SHARK_MAX_ANGULAR_SPEED)
 
-            if center_prox >= self.hard_stop_proximity:
+            if center_prox >= self.turn_in_place_proximity:
                 cmd.linear.x = 0.0
-            elif center_prox >= self.turn_in_place_proximity:
-                cmd.linear.x = self.crawl_speed
             else:
                 heading_factor = clamp(1.0 - 0.35 * abs(bearing), 0.25, 1.0)
                 obstacle_factor = clamp(1.0 - center_prox, 0.2, 1.0)

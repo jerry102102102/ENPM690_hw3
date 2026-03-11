@@ -19,11 +19,6 @@ shark_auto_controller:
     k_target: 1.6
     k_avoid: 1.4
     control_hz: 10.0
-    turn_in_place_proximity: 0.90
-    hard_stop_proximity: 0.965
-    cruise_speed: 0.22
-    crawl_speed: 0.08
-    max_speed_scale: 1.0
 
 marker_publisher:
   ros__parameters:
