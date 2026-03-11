@@ -11,14 +11,11 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from std_msgs.msg import Bool, String
-from simulation_interfaces.srv import DeleteEntity, GetEntities, SetEntityState, SpawnEntity
+from simulation_interfaces.srv import SetEntityState
 
 from .gazebo_fish_utils import (
-    make_delete_entity_request,
     fish_model_paths,
-    make_get_entities_request,
     make_set_entity_state_request,
-    make_spawn_entity_request,
 )
 
 
@@ -26,22 +23,16 @@ class GazeboFishSync(Node):
     def __init__(self) -> None:
         super().__init__("gazebo_fish_sync")
         self.declare_parameter("fish_state_topic", "/phase2/fish_state_json")
-        self.declare_parameter("startup_timeout", 30.0)
         self.declare_parameter("service_timeout", 15.0)
         self.declare_parameter("sync_period", 0.1)
-        self.declare_parameter("max_spawn_per_tick", 6)
-        self.declare_parameter("entity_refresh_period", 2.0)
         self.declare_parameter("moving_sync_distance", 0.015)
         self.declare_parameter("static_sync_distance", 0.05)
         self.declare_parameter("max_sync_staleness", 0.5)
         self.declare_parameter("ready_topic", "/phase2/fish_sync_ready")
 
         self.fish_state_topic = str(self.get_parameter("fish_state_topic").value)
-        self.startup_timeout = float(self.get_parameter("startup_timeout").value)
         self.service_timeout = float(self.get_parameter("service_timeout").value)
         self.sync_period = float(self.get_parameter("sync_period").value)
-        self.max_spawn_per_tick = int(self.get_parameter("max_spawn_per_tick").value)
-        self.entity_refresh_period = float(self.get_parameter("entity_refresh_period").value)
         self.moving_sync_distance = float(self.get_parameter("moving_sync_distance").value)
         self.static_sync_distance = float(self.get_parameter("static_sync_distance").value)
         self.max_sync_staleness = float(self.get_parameter("max_sync_staleness").value)
@@ -52,15 +43,11 @@ class GazeboFishSync(Node):
         self._services_ready = False
         self._pending_fish_list: list[dict] = []
         self._last_wait_log_time = 0.0
-        self._last_refresh_time = 0.0
         self._last_error_log_time = 0.0
         self._last_ready_state = False
         self._callback_group = ReentrantCallbackGroup()
 
         self.ready_pub = self.create_publisher(Bool, self.ready_topic, 10)
-        self.spawn_entity_client = self.create_client(SpawnEntity, "/gzserver/spawn_entity", callback_group=self._callback_group)
-        self.delete_entity_client = self.create_client(DeleteEntity, "/gzserver/delete_entity", callback_group=self._callback_group)
-        self.get_entities_client = self.create_client(GetEntities, "/gzserver/get_entities", callback_group=self._callback_group)
         self.set_entity_state_client = self.create_client(SetEntityState, "/gzserver/set_entity_state", callback_group=self._callback_group)
 
         self.create_subscription(String, self.fish_state_topic, self._fish_state_callback, 10, callback_group=self._callback_group)
@@ -68,12 +55,7 @@ class GazeboFishSync(Node):
         self.get_logger().info(f"gazebo fish sync listening on {self.fish_state_topic}")
 
     def _sync_tick(self) -> None:
-        services = (
-            self.spawn_entity_client,
-            self.delete_entity_client,
-            self.get_entities_client,
-            self.set_entity_state_client,
-        )
+        services = (self.set_entity_state_client,)
         ready = all(client.wait_for_service(timeout_sec=0.01) for client in services)
         now = time.time()
         if not ready:
@@ -127,61 +109,29 @@ class GazeboFishSync(Node):
         if not self._services_ready:
             self._publish_ready(False)
 
-    def _refresh_known_entities(self) -> None:
-        response = self._call_service(self.get_entities_client, make_get_entities_request(), timeout_sec=self.service_timeout)
-        self.known_entities = set(response.entities)
-        self.last_synced_state = {
-            fish_id: state for fish_id, state in self.last_synced_state.items() if fish_id in self.known_entities
-        }
-        self._last_refresh_time = time.time()
-
     def _ensure_fish_entities(self, fish_list: list[dict]) -> None:
-        now = time.time()
-        unseen = [fish for fish in fish_list if fish.get("fish_id") not in self.known_entities]
-        if unseen and (not self.known_entities or now - self._last_refresh_time >= self.entity_refresh_period):
-            self._refresh_known_entities()
-            unseen = [fish for fish in fish_list if fish.get("fish_id") not in self.known_entities]
-
-        spawned = 0
-        for fish in unseen:
-            fish_id = fish.get("fish_id")
-            species = fish.get("species")
-            if not fish_id or not species:
-                continue
-            if fish_id in self.known_entities:
-                continue
-            request = make_spawn_entity_request(
-                entity_name=fish_id,
-                model_path=self.model_paths[species],
-                x=float(fish.get("x", 0.0)),
-                y=float(fish.get("y", 0.0)),
-            )
-            self._call_service(self.spawn_entity_client, request, timeout_sec=self.service_timeout)
-            self.known_entities.add(fish_id)
-            self.get_logger().info(f"spawned Gazebo fish entity {fish_id}")
-            spawned += 1
-            if spawned >= self.max_spawn_per_tick:
-                break
+        self.known_entities = {
+            str(fish.get("fish_id"))
+            for fish in fish_list
+            if fish.get("fish_id")
+        }
 
     def _sync_known_fish(self, fish_list: list[dict]) -> None:
         for fish in fish_list:
             fish_id = fish.get("fish_id")
             if fish_id not in self.known_entities:
                 continue
-            if not bool(fish.get("active", False)):
-                self._delete_fish_entity(fish_id)
-                continue
             if not self._should_sync_fish(fish):
                 continue
             self._sync_single_fish(fish)
 
     def _all_active_fish_present(self) -> bool:
-        active_ids = {
+        fish_ids = {
             str(fish.get("fish_id"))
             for fish in self._pending_fish_list
-            if fish.get("fish_id") and bool(fish.get("active", False))
+            if fish.get("fish_id")
         }
-        return bool(active_ids) and active_ids.issubset(self.known_entities)
+        return bool(fish_ids) and fish_ids.issubset(self.known_entities)
 
     def _should_sync_fish(self, fish: dict) -> bool:
         fish_id = fish.get("fish_id")
@@ -232,18 +182,6 @@ class GazeboFishSync(Node):
             self.known_entities.discard(fish_id)
             self.last_synced_state.pop(fish_id, None)
             self._log_sync_warning(f"set state failed for {fish_id}, will respawn later: {exc}")
-
-    def _delete_fish_entity(self, fish_id: str) -> None:
-        try:
-            self._call_service(
-                self.delete_entity_client,
-                make_delete_entity_request(fish_id),
-                timeout_sec=self.service_timeout,
-            )
-            self.known_entities.discard(fish_id)
-            self.last_synced_state.pop(fish_id, None)
-        except Exception as exc:
-            self._log_sync_warning(f"delete entity failed for {fish_id}, will retry: {exc}")
 
     def _log_sync_warning(self, message: str) -> None:
         now = time.time()
