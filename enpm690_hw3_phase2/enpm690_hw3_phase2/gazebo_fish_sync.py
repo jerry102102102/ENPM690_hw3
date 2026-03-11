@@ -28,22 +28,41 @@ class GazeboFishSync(Node):
         self.startup_timeout = float(self.get_parameter("startup_timeout").value)
         self.model_paths = fish_model_paths()
         self.known_entities: set[str] = set()
-        self._have_received_state = False
+        self._services_ready = False
+        self._pending_fish_list: list[dict] = []
+        self._last_wait_log_time = 0.0
 
         self.spawn_entity_client = self.create_client(SpawnEntity, "/gzserver/spawn_entity")
         self.get_entities_client = self.create_client(GetEntities, "/gzserver/get_entities")
         self.set_entity_state_client = self.create_client(SetEntityState, "/gzserver/set_entity_state")
 
-        self._wait_for_services()
         self.create_subscription(String, self.fish_state_topic, self._fish_state_callback, 10)
+        self.create_timer(0.5, self._startup_tick)
         self.get_logger().info(f"gazebo fish sync listening on {self.fish_state_topic}")
 
-    def _wait_for_services(self) -> None:
-        deadline = time.time() + self.startup_timeout
-        for client in (self.spawn_entity_client, self.get_entities_client, self.set_entity_state_client):
-            remaining = max(0.1, deadline - time.time())
-            if not client.wait_for_service(timeout_sec=remaining):
-                raise RuntimeError(f"Required Gazebo fish sync service not ready: {client.srv_name}")
+    def _startup_tick(self) -> None:
+        if self._services_ready:
+            return
+
+        services = (
+            self.spawn_entity_client,
+            self.get_entities_client,
+            self.set_entity_state_client,
+        )
+        ready = all(client.wait_for_service(timeout_sec=0.01) for client in services)
+        now = time.time()
+        if not ready:
+            if now - self._last_wait_log_time >= 5.0:
+                self.get_logger().info("waiting for Gazebo fish sync services...")
+                self._last_wait_log_time = now
+            return
+
+        self._services_ready = True
+        self.get_logger().info("Gazebo fish sync services are ready")
+        if self._pending_fish_list:
+            self._ensure_fish_entities(self._pending_fish_list)
+            for fish in self._pending_fish_list:
+                self._sync_single_fish(fish)
 
     def _call_service(self, client, request, timeout_sec: float = 5.0):
         future = client.call_async(request)
@@ -68,7 +87,9 @@ class GazeboFishSync(Node):
             self.get_logger().warning("fish state payload is not a list")
             return
 
-        self._have_received_state = True
+        self._pending_fish_list = fish_list
+        if not self._services_ready:
+            return
         self._ensure_fish_entities(fish_list)
         for fish in fish_list:
             self._sync_single_fish(fish)

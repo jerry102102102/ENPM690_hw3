@@ -2,8 +2,9 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, TimerAction
+from launch.actions import IncludeLaunchDescription, SetEnvironmentVariable, TimerAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import EnvironmentVariable
 from launch_ros.actions import Node
 
 
@@ -23,6 +24,10 @@ def generate_launch_description() -> LaunchDescription:
 
     return LaunchDescription(
         [
+            SetEnvironmentVariable(
+                "GZ_SIM_RESOURCE_PATH",
+                [str(phase2_share / "models"), ":", str(phase2_share / "worlds"), ":", EnvironmentVariable("GZ_SIM_RESOURCE_PATH", default_value="")],
+            ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(str(phase1_share / "launch" / "gazebo_world.launch.py")),
                 launch_arguments={"world": world}.items(),

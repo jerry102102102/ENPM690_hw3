@@ -27,7 +27,7 @@ def make_spawn_entity_request(entity_name: str, model_path: Path, x: float, y: f
     request = SpawnEntity.Request()
     request.name = entity_name
     request.allow_renaming = False
-    request.entity_resource = Resource(uri=model_path.as_uri(), resource_string="")
+    request.entity_resource = Resource(uri=model_path.as_uri(), resource_string=model_path.read_text())
     request.initial_pose.header.frame_id = "world"
     request.initial_pose.pose.position.x = x
     request.initial_pose.pose.position.y = y
