@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import random
 from dataclasses import dataclass
 
 import rclpy
@@ -53,6 +54,9 @@ class SharkAutoController(Node):
         self.declare_parameter("search_turn_speed", 0.85)
         self.declare_parameter("lock_linear_speed", 0.55)
         self.declare_parameter("lock_min_linear_speed", 0.12)
+        self.declare_parameter("search_hint_refresh_sec", 1.5)
+        self.declare_parameter("search_hint_gain", 0.9)
+        self.declare_parameter("chase_lost_timeout_sec", 0.8)
         self.declare_parameter("wall_stop_distance", 0.24)
         self.declare_parameter("wall_slow_distance", 0.70)
         self.declare_parameter("lidar_target_bias", 0.9)
@@ -71,6 +75,9 @@ class SharkAutoController(Node):
         self.search_turn_speed = float(self.get_parameter("search_turn_speed").value)
         self.lock_linear_speed = float(self.get_parameter("lock_linear_speed").value)
         self.lock_min_linear_speed = float(self.get_parameter("lock_min_linear_speed").value)
+        self.search_hint_refresh_sec = float(self.get_parameter("search_hint_refresh_sec").value)
+        self.search_hint_gain = float(self.get_parameter("search_hint_gain").value)
+        self.chase_lost_timeout_sec = float(self.get_parameter("chase_lost_timeout_sec").value)
         self.wall_stop_distance = float(self.get_parameter("wall_stop_distance").value)
         self.wall_slow_distance = float(self.get_parameter("wall_slow_distance").value)
         self.lidar_target_bias = float(self.get_parameter("lidar_target_bias").value)
@@ -86,8 +93,11 @@ class SharkAutoController(Node):
         self.scan: LaserScan | None = None
         self.fish_state_payload = ""
         self.game_state_payload = ""
+        self.rng = random.Random()
         self.mode = "searching"
-        self.locked_target_id = ""
+        self.search_hint: dict | None = None
+        self.next_hint_refresh_time = 0.0
+        self.last_lidar_contact_time = 0.0
         self.last_log_time = self.get_clock().now()
 
         self.cmd_pub = self.create_publisher(Twist, self.cmd_topic, 10)
@@ -129,7 +139,6 @@ class SharkAutoController(Node):
             return
 
         fish_states = fish_states_from_json(self.fish_state_payload)
-        target = self._resolve_target(fish_states)
         sectors = self._sector_proximities(
             ObservationBuilder.preprocess_scan_ranges(
                 self.scan.ranges,
@@ -141,57 +150,55 @@ class SharkAutoController(Node):
         wall_turn = self._wall_avoid_turn(sectors)
         front_distance = self._sector_distance(sectors.center)
         lidar_cluster = self._best_lidar_target_cluster()
-        lidar_turn = 0.0 if lidar_cluster is None else self.lidar_target_bias * lidar_cluster.center_angle
+        self._update_mode(lidar_cluster)
 
-        if target is None:
-            cmd = self._build_search_command(wall_turn, front_distance)
+        if self.mode == "chasing" and lidar_cluster is not None:
+            cmd = self._build_chase_command(lidar_cluster, wall_turn, front_distance)
         else:
-            target_bearing = angle_diff(
-                bearing_xy(self.shark.x, self.shark.y, target["x"], target["y"]),
-                self.shark.heading,
-            )
-            cmd = self._build_lock_command(target_bearing, lidar_turn, wall_turn, front_distance)
+            search_hint = self._refresh_search_hint(fish_states)
+            cmd = self._build_search_command(search_hint, wall_turn, front_distance)
 
-        self._log_status(target, cmd)
+        self._log_status(lidar_cluster, cmd)
         self.cmd_pub.publish(cmd)
 
-    def _resolve_target(self, fish_states: list[dict]) -> dict | None:
-        active_by_id = {fish["fish_id"]: fish for fish in fish_states if fish.get("active", False)}
-        if self.locked_target_id in active_by_id:
-            if self.mode != "lock_and_chase":
-                self.mode = "lock_and_chase"
-                self.get_logger().info(f"[AUTO] mode transition: searching -> lock_and_chase ({self.locked_target_id})")
-            return active_by_id[self.locked_target_id]
+    def _update_mode(self, lidar_cluster: LidarCluster | None) -> None:
+        now = self.get_clock().now().nanoseconds / 1e9
+        if lidar_cluster is not None:
+            self.last_lidar_contact_time = now
+            if self.mode != "chasing":
+                self.mode = "chasing"
+                self.get_logger().info("[AUTO] mode transition: searching -> chasing")
+            return
 
-        best = self._select_best_target(fish_states)
-        if best is None:
-            if self.mode != "searching":
-                self.mode = "searching"
-                self.get_logger().info("[AUTO] mode transition: lock_and_chase -> searching")
-            self.locked_target_id = ""
+        if self.mode == "chasing" and now - self.last_lidar_contact_time > self.chase_lost_timeout_sec:
+            self.mode = "searching"
+            self.search_hint = None
+            self.next_hint_refresh_time = 0.0
+            self.get_logger().info("[AUTO] mode transition: chasing -> searching")
+
+    def _refresh_search_hint(self, fish_states: list[dict]) -> dict | None:
+        active_fish = [fish for fish in fish_states if fish.get("active", False)]
+        if not active_fish:
+            self.search_hint = None
             return None
 
-        self.locked_target_id = str(best["fish_id"])
-        if self.mode != "lock_and_chase":
-            self.mode = "lock_and_chase"
-            self.get_logger().info(f"[AUTO] mode transition: searching -> lock_and_chase ({self.locked_target_id})")
-        return best
+        now = self.get_clock().now().nanoseconds / 1e9
+        if self.search_hint is not None and now < self.next_hint_refresh_time:
+            return self.search_hint
 
-    def _select_best_target(self, fish_states: list[dict]) -> dict | None:
-        best = None
-        best_utility = float("-inf")
-        score_map = {"tuna": 10.0, "sardine": 3.0, "seaweed": 1.0}
-        for fish in fish_states:
-            if not fish.get("active", False):
-                continue
-            distance = distance_xy(self.shark.x, self.shark.y, fish["x"], fish["y"])
-            utility = score_map.get(fish["species"], 0.0) / (distance + 1e-3)
-            if utility > best_utility:
-                best = fish
-                best_utility = utility
-        return best
+        preferred = [fish for fish in active_fish if fish.get("species") in {"tuna", "sardine"}]
+        candidates = preferred or active_fish
+        chosen = self.rng.choice(candidates)
+        self.search_hint = {
+            "fish_id": chosen["fish_id"],
+            "species": chosen["species"],
+            "x": float(chosen["x"]),
+            "y": float(chosen["y"]),
+        }
+        self.next_hint_refresh_time = now + self.search_hint_refresh_sec
+        return self.search_hint
 
-    def _build_search_command(self, wall_turn: float, front_distance: float) -> Twist:
+    def _build_search_command(self, search_hint: dict | None, wall_turn: float, front_distance: float) -> Twist:
         cmd = Twist()
         open_direction = 1.0 if wall_turn >= 0.0 else -1.0
         if front_distance <= self._effective_wall_stop_distance():
@@ -201,20 +208,27 @@ class SharkAutoController(Node):
 
         speed_scale = clamp(front_distance / self._effective_wall_slow_distance(), 0.35, 1.0)
         cmd.linear.x = clamp(self.search_forward_speed * speed_scale, 0.0, SHARK_MAX_LINEAR_SPEED)
-        cmd.angular.z = clamp(self.search_turn_speed + 0.8 * wall_turn, -SHARK_MAX_ANGULAR_SPEED, SHARK_MAX_ANGULAR_SPEED)
+        hint_turn = 0.0
+        if search_hint is not None:
+            search_bearing = angle_diff(
+                bearing_xy(self.shark.x, self.shark.y, search_hint["x"], search_hint["y"]),
+                self.shark.heading,
+            )
+            hint_turn = self.search_hint_gain * search_bearing
+        cmd.angular.z = clamp(hint_turn + 0.8 * self.search_turn_speed + 0.8 * wall_turn, -SHARK_MAX_ANGULAR_SPEED, SHARK_MAX_ANGULAR_SPEED)
         return cmd
 
-    def _build_lock_command(
+    def _build_chase_command(
         self,
-        target_bearing: float,
-        lidar_turn: float,
+        lidar_cluster: LidarCluster,
         wall_turn: float,
         front_distance: float,
     ) -> Twist:
         cmd = Twist()
         open_direction = 1.0 if wall_turn >= 0.0 else -1.0
+        lidar_turn = self.lidar_target_bias * lidar_cluster.center_angle
         cmd.angular.z = clamp(
-            self.k_target * target_bearing + 0.45 * lidar_turn + wall_turn,
+            1.2 * lidar_turn + wall_turn,
             -SHARK_MAX_ANGULAR_SPEED,
             SHARK_MAX_ANGULAR_SPEED,
         )
@@ -223,7 +237,7 @@ class SharkAutoController(Node):
             cmd.angular.z = clamp(cmd.angular.z + 0.6 * open_direction, -SHARK_MAX_ANGULAR_SPEED, SHARK_MAX_ANGULAR_SPEED)
             return cmd
 
-        heading_scale = clamp(1.0 - 0.45 * abs(target_bearing), 0.25, 1.0)
+        heading_scale = clamp(1.0 - 0.65 * abs(lidar_cluster.center_angle), 0.20, 1.0)
         clearance_scale = clamp(front_distance / self._effective_wall_slow_distance(), 0.35, 1.0)
         max_speed = clamp(self.lock_linear_speed * self._speed_scale(), 0.0, SHARK_MAX_LINEAR_SPEED)
         cmd.linear.x = clamp(max_speed * heading_scale * clearance_scale, self.lock_min_linear_speed, max_speed)
@@ -351,18 +365,19 @@ class SharkAutoController(Node):
         )
         return euclidean_gap > self.lidar_cluster_jump_distance
 
-    def _log_status(self, target: dict | None, cmd: Twist) -> None:
+    def _log_status(self, lidar_cluster: LidarCluster | None, cmd: Twist) -> None:
         now = self.get_clock().now()
         if (now - self.last_log_time).nanoseconds / 1e9 < 1.0:
             return
-        if target is None:
+        if self.mode == "searching":
+            hint = "none" if self.search_hint is None else str(self.search_hint["fish_id"])
             self.get_logger().info(
-                f"[AUTO] mode={self.mode} target=none v={cmd.linear.x:.2f} w={cmd.angular.z:.2f}"
+                f"[AUTO] mode={self.mode} hint={hint} v={cmd.linear.x:.2f} w={cmd.angular.z:.2f}"
             )
         else:
-            distance = distance_xy(self.shark.x, self.shark.y, target["x"], target["y"])
             self.get_logger().info(
-                f"[AUTO] mode={self.mode} target={target['fish_id']} dist={distance:.2f} "
+                f"[AUTO] mode={self.mode} cluster_range={0.0 if lidar_cluster is None else lidar_cluster.mean_range:.2f} "
+                f"cluster_angle={0.0 if lidar_cluster is None else lidar_cluster.center_angle:.2f} "
                 f"v={cmd.linear.x:.2f} w={cmd.angular.z:.2f}"
             )
         self.last_log_time = now

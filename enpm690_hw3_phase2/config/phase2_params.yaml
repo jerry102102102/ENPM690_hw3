@@ -28,6 +28,9 @@ shark_auto_controller:
     search_turn_speed: 0.85
     lock_linear_speed: 0.55
     lock_min_linear_speed: 0.12
+    search_hint_refresh_sec: 1.5
+    search_hint_gain: 0.9
+    chase_lost_timeout_sec: 0.8
     wall_stop_distance: 0.24
     wall_slow_distance: 0.70
     lidar_target_bias: 0.9

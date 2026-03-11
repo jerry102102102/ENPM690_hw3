@@ -34,6 +34,9 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("search_turn_speed", default_value="0.85"),
             DeclareLaunchArgument("lock_linear_speed", default_value="0.55"),
             DeclareLaunchArgument("lidar_target_bias", default_value="0.9"),
+            DeclareLaunchArgument("search_hint_refresh_sec", default_value="1.5"),
+            DeclareLaunchArgument("search_hint_gain", default_value="0.9"),
+            DeclareLaunchArgument("chase_lost_timeout_sec", default_value="0.8"),
             DeclareLaunchArgument("tuna_speed_scale", default_value="0.35"),
             DeclareLaunchArgument("sardine_speed_scale", default_value="0.18"),
             SetEnvironmentVariable(
@@ -91,7 +94,7 @@ def generate_launch_description() -> LaunchDescription:
                 executable="gazebo_fish_sync",
                 name="gazebo_fish_sync",
                 output="screen",
-                parameters=[{"use_sim_time": True}],
+                parameters=[{"use_sim_time": True, "delete_inactive_fish": True}],
             ),
             Node(
                 package="enpm690_hw3_phase2",
@@ -106,6 +109,9 @@ def generate_launch_description() -> LaunchDescription:
                         "search_turn_speed": LaunchConfiguration("search_turn_speed"),
                         "lock_linear_speed": LaunchConfiguration("lock_linear_speed"),
                         "lidar_target_bias": LaunchConfiguration("lidar_target_bias"),
+                        "search_hint_refresh_sec": LaunchConfiguration("search_hint_refresh_sec"),
+                        "search_hint_gain": LaunchConfiguration("search_hint_gain"),
+                        "chase_lost_timeout_sec": LaunchConfiguration("chase_lost_timeout_sec"),
                     },
                 ],
             ),
