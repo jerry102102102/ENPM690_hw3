@@ -8,11 +8,12 @@ from pathlib import Path
 
 import numpy as np
 
-from .gazebo_env import GazeboSharkHuntEnv
-from .logical_env import SharkHuntLogicalEnv
+from .runtime_diagnostics import log_python_runtime
 
 
 def main() -> None:
+    log_python_runtime("eval_policy")
+
     parser = argparse.ArgumentParser(description="Evaluate a saved PPO policy on the Phase 2 shark hunt environment.")
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--episodes", type=int, default=5)
@@ -29,6 +30,9 @@ def main() -> None:
         raise SystemExit(
             "stable-baselines3 is required for evaluation. Install it with `pip install stable-baselines3 gymnasium`."
         ) from exc
+
+    from .gazebo_env import GazeboSharkHuntEnv
+    from .logical_env import SharkHuntLogicalEnv
 
     env = None
     try:

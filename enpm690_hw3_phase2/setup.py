@@ -36,8 +36,6 @@ setup(
             "gazebo_fish_sync = enpm690_hw3_phase2.gazebo_fish_sync:main",
             "marker_publisher = enpm690_hw3_phase2.marker_publisher:main",
             "shark_auto_controller = enpm690_hw3_phase2.shark_auto_controller:main",
-            "train_ppo = enpm690_hw3_phase2.train_ppo:main",
-            "eval_policy = enpm690_hw3_phase2.eval_policy:main",
         ],
     },
 )

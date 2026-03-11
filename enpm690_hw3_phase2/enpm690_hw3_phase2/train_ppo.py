@@ -8,8 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .gazebo_env import GazeboSharkHuntEnv
-from .logical_env import SharkHuntLogicalEnv
+from .runtime_diagnostics import log_python_runtime
 
 
 def _run_random_smoke(env, steps: int = 20) -> None:
@@ -31,6 +30,8 @@ def _run_scripted_smoke(env, steps: int = 20) -> None:
 
 
 def main() -> None:
+    log_python_runtime("train_ppo")
+
     parser = argparse.ArgumentParser(description="Train PPO on the Phase 2 shark hunt environment.")
     parser.add_argument("--timesteps", type=int, default=20_000)
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts/phase2_ppo"))
@@ -47,6 +48,9 @@ def main() -> None:
         raise SystemExit(
             "stable-baselines3 is required for training. Install it with `pip install stable-baselines3 gymnasium`."
         ) from exc
+
+    from .gazebo_env import GazeboSharkHuntEnv
+    from .logical_env import SharkHuntLogicalEnv
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     env = None

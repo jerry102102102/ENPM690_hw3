@@ -38,7 +38,8 @@ sudo apt install -y \
 如果你之後要做 PPO training，還需要 Python 套件：
 
 ```bash
-pip install gymnasium stable-baselines3
+source scripts/dev_env.sh
+python -m pip install gymnasium stable-baselines3
 ```
 
 ## 2. 進入工作區
@@ -65,6 +66,47 @@ source /opt/ros/jazzy/setup.bash
 colcon build --packages-select enpm690_hw3_phase1 enpm690_hw3_phase2
 source install/setup.bash
 ```
+
+## 4.1 為什麼 training / evaluation 不用 `ros2 run`
+
+這個 repo 的正式做法是：
+
+- play / demo 類 ROS runtime node 繼續用 `ros2 launch` / `ros2 run`
+- training / evaluation 類 ML scripts 改用 `python -m ...`
+
+原因是：
+
+- Ubuntu 24.04 / Python 3.12 有 PEP 668 保護，不應該直接往系統 Python 安裝第三方 ML 套件
+- ROS 2 官方文件也建議額外 Python 套件用 virtual environment 管理
+- 但 binary install 的 ROS 2 在 `ros2 run` 產生 Python entry script 時，已知可能仍綁到 `/usr/bin/python3`
+- 這會讓 script 看不到 `.venv` 裡安裝的 `gymnasium` / `stable-baselines3`
+
+所以這個 repo 把：
+
+- ROS node 保持在 ROS 執行模型
+- `train_ppo` / `eval_policy` 改成用目前啟用的 virtualenv interpreter 執行
+
+建議每個新 terminal 先做：
+
+```bash
+cd /你的路徑/ENPM690_hw3
+source scripts/dev_env.sh
+```
+
+`scripts/dev_env.sh` 會：
+
+- activate `.venv`
+- source `/opt/ros/jazzy/setup.bash` 或 `setup.zsh`
+- source workspace `install/setup.bash` 或 `setup.zsh`
+- 印出目前使用的 `sys.executable` 和 `sys.version`
+
+另外，`python -m enpm690_hw3_phase2.train_ppo` 與
+`python -m enpm690_hw3_phase2.eval_policy` 在啟動時也會先印：
+
+- `sys.executable`
+- `sys.version`
+- `gymnasium` import 是否成功
+- `stable_baselines3` import 是否成功
 
 ## 5. Phase 2 Teleop Play
 
@@ -212,18 +254,16 @@ ros2 launch enpm690_hw3_phase2 phase2_train.launch.py
 
 ```bash
 cd /你的路徑/ENPM690_hw3
-source /opt/ros/jazzy/setup.bash
-source install/setup.bash
-ros2 run enpm690_hw3_phase2 train_ppo -- --timesteps 20000 --output-dir artifacts/phase2_ppo
+source scripts/dev_env.sh
+python -m enpm690_hw3_phase2.train_ppo --timesteps 20000 --output-dir artifacts/phase2_ppo
 ```
 
 ### 方式 B：讓 train_ppo.py 自己啟動 training stack
 
 ```bash
 cd /你的路徑/ENPM690_hw3
-source /opt/ros/jazzy/setup.bash
-source install/setup.bash
-ros2 run enpm690_hw3_phase2 train_ppo -- --launch-stack --timesteps 20000 --output-dir artifacts/phase2_ppo
+source scripts/dev_env.sh
+python -m enpm690_hw3_phase2.train_ppo --launch-stack --timesteps 20000 --output-dir artifacts/phase2_ppo
 ```
 
 ## 10. Training 常用參數
@@ -231,25 +271,25 @@ ros2 run enpm690_hw3_phase2 train_ppo -- --launch-stack --timesteps 20000 --outp
 最常用：
 
 ```bash
-ros2 run enpm690_hw3_phase2 train_ppo -- --launch-stack --timesteps 20000 --output-dir artifacts/phase2_ppo
+python -m enpm690_hw3_phase2.train_ppo --launch-stack --timesteps 20000 --output-dir artifacts/phase2_ppo
 ```
 
 如果你要改 timeout：
 
 ```bash
-ros2 run enpm690_hw3_phase2 train_ppo -- --launch-stack --stack-timeout 60 --timesteps 20000
+python -m enpm690_hw3_phase2.train_ppo --launch-stack --stack-timeout 60 --timesteps 20000
 ```
 
 如果你要明確指定 headless：
 
 ```bash
-ros2 run enpm690_hw3_phase2 train_ppo -- --launch-stack --headless --timesteps 20000
+python -m enpm690_hw3_phase2.train_ppo --launch-stack --headless --timesteps 20000
 ```
 
 如果你只是 debug，不想走真 Gazebo env，才用 fallback logical env：
 
 ```bash
-ros2 run enpm690_hw3_phase2 train_ppo -- --use-logical-env --timesteps 2000
+python -m enpm690_hw3_phase2.train_ppo --use-logical-env --timesteps 2000
 ```
 
 注意：
@@ -263,9 +303,8 @@ ros2 run enpm690_hw3_phase2 train_ppo -- --use-logical-env --timesteps 2000
 
 ```bash
 cd /你的路徑/ENPM690_hw3
-source /opt/ros/jazzy/setup.bash
-source install/setup.bash
-ros2 run enpm690_hw3_phase2 eval_policy -- --launch-stack --headless --model artifacts/phase2_ppo/ppo_shark_hunt.zip --episodes 5
+source scripts/dev_env.sh
+python -m enpm690_hw3_phase2.eval_policy --launch-stack --headless --model artifacts/phase2_ppo/ppo_shark_hunt.zip --episodes 5
 ```
 
 ### Visible evaluation
@@ -274,9 +313,8 @@ ros2 run enpm690_hw3_phase2 eval_policy -- --launch-stack --headless --model art
 
 ```bash
 cd /你的路徑/ENPM690_hw3
-source /opt/ros/jazzy/setup.bash
-source install/setup.bash
-ros2 run enpm690_hw3_phase2 eval_policy -- --launch-stack --no-headless --model artifacts/phase2_ppo/ppo_shark_hunt.zip --episodes 3
+source scripts/dev_env.sh
+python -m enpm690_hw3_phase2.eval_policy --launch-stack --no-headless --model artifacts/phase2_ppo/ppo_shark_hunt.zip --episodes 3
 ```
 
 ## 12. 直接啟動 Visible Eval Stack
@@ -367,7 +405,7 @@ Training mode 不依賴這個 play-mode node；Gazebo-backed env 仍然走它自
 3. 再確認 `phase2_play_auto.launch.py` 還能自動玩
 4. 再確認 `phase2_train.launch.py` 起得來
 5. 用 `ros2 topic echo /scan` 和 `/odom` 確認 training stack 有資料
-6. 最後再跑 `train_ppo`
+6. 最後再跑 `python -m enpm690_hw3_phase2.train_ppo`
 
 最小命令如下：
 
@@ -392,9 +430,8 @@ ros2 topic echo /scan
 
 ```bash
 cd /你的路徑/ENPM690_hw3
-source /opt/ros/jazzy/setup.bash
-source install/setup.bash
-ros2 run enpm690_hw3_phase2 train_ppo -- --timesteps 20000 --output-dir artifacts/phase2_ppo
+source scripts/dev_env.sh
+python -m enpm690_hw3_phase2.train_ppo --timesteps 20000 --output-dir artifacts/phase2_ppo
 ```
 
 ## 18. 常見問題優先檢查
@@ -434,7 +471,7 @@ ros2 service list | grep gzserver
 如果 service 還沒全部起來，可以把 timeout 拉長：
 
 ```bash
-ros2 run enpm690_hw3_phase2 train_ppo -- --launch-stack --stack-timeout 90 --timesteps 20000
+python -m enpm690_hw3_phase2.train_ppo --launch-stack --stack-timeout 90 --timesteps 20000
 ```
 
 ### 4. `simulation_interfaces` 找不到
@@ -489,19 +526,19 @@ ros2 launch enpm690_hw3_phase2 phase2_train.launch.py
 ### Gazebo-backed PPO train
 
 ```bash
-ros2 run enpm690_hw3_phase2 train_ppo -- --launch-stack --timesteps 20000 --output-dir artifacts/phase2_ppo
+python -m enpm690_hw3_phase2.train_ppo --launch-stack --timesteps 20000 --output-dir artifacts/phase2_ppo
 ```
 
 ### Gazebo-backed headless eval
 
 ```bash
-ros2 run enpm690_hw3_phase2 eval_policy -- --launch-stack --headless --model artifacts/phase2_ppo/ppo_shark_hunt.zip --episodes 5
+python -m enpm690_hw3_phase2.eval_policy --launch-stack --headless --model artifacts/phase2_ppo/ppo_shark_hunt.zip --episodes 5
 ```
 
 ### Gazebo-backed visible eval
 
 ```bash
-ros2 run enpm690_hw3_phase2 eval_policy -- --launch-stack --no-headless --model artifacts/phase2_ppo/ppo_shark_hunt.zip --episodes 3
+python -m enpm690_hw3_phase2.eval_policy --launch-stack --no-headless --model artifacts/phase2_ppo/ppo_shark_hunt.zip --episodes 3
 ```
 
 如果你要，我下一步可以再幫你補一份更短的「Phase 2 demo / train 一頁版指令卡」，只保留最必要的命令。 
