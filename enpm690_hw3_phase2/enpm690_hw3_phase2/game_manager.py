@@ -71,6 +71,7 @@ class GameManager(Node):
         self.catch_counts = {"tuna": 0, "sardine": 0, "seaweed": 0}
         self.current_target_id = ""
         self.current_target_species = ""
+        self.fish_sync_ready = self.mode == MODE_TRAIN
         self.waiting_for_sync = self.mode != MODE_TRAIN
         self._logged_waiting_for_sync = False
 
@@ -98,7 +99,7 @@ class GameManager(Node):
         self.current_target_id = ""
         self.current_target_species = ""
         self.shark.collision_cooldown = 0.0
-        self.waiting_for_sync = self.mode != MODE_TRAIN
+        self.waiting_for_sync = self.mode != MODE_TRAIN and not self.fish_sync_ready
         self._logged_waiting_for_sync = False
         if initial:
             self.get_logger().info(f"[GAME] episode started mode={self.mode}")
@@ -128,10 +129,13 @@ class GameManager(Node):
     def _fish_sync_ready_callback(self, msg: Bool) -> None:
         if self.mode == MODE_TRAIN:
             return
+        self.fish_sync_ready = bool(msg.data)
         if self.waiting_for_sync and msg.data:
             self.waiting_for_sync = False
             self._logged_waiting_for_sync = False
             self.get_logger().info("[GAME] fish visuals ready, starting episode")
+        elif not msg.data:
+            self.waiting_for_sync = True
 
     def _tick(self) -> None:
         if self.waiting_for_sync:

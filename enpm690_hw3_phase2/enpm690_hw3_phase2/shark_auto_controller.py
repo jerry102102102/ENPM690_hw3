@@ -30,11 +30,17 @@ class SharkAutoController(Node):
         self.declare_parameter("k_target", 1.6)
         self.declare_parameter("k_avoid", 1.4)
         self.declare_parameter("control_hz", 10.0)
+        self.declare_parameter("turn_in_place_proximity", 0.72)
+        self.declare_parameter("cruise_speed", 0.22)
+        self.declare_parameter("max_speed_scale", 1.0)
 
         self.cmd_topic = str(self.get_parameter("cmd_topic").value)
         self.k_target = float(self.get_parameter("k_target").value)
         self.k_avoid = float(self.get_parameter("k_avoid").value)
         control_hz = float(self.get_parameter("control_hz").value)
+        self.turn_in_place_proximity = float(self.get_parameter("turn_in_place_proximity").value)
+        self.cruise_speed = float(self.get_parameter("cruise_speed").value)
+        self.max_speed_scale = float(self.get_parameter("max_speed_scale").value)
 
         self.shark = SharkState()
         self.scan: LaserScan | None = None
@@ -101,14 +107,19 @@ class SharkAutoController(Node):
             avoid_turn = self.k_avoid * (right_prox - left_prox)
             cmd.angular.z = clamp(target_turn + avoid_turn, -SHARK_MAX_ANGULAR_SPEED, SHARK_MAX_ANGULAR_SPEED)
 
-            speed_factor = clamp(1.0 - 1.1 * center_prox, 0.0, 1.0)
-            cmd.linear.x = SHARK_MAX_LINEAR_SPEED * speed_factor
+            if center_prox >= self.turn_in_place_proximity:
+                cmd.linear.x = 0.0
+            else:
+                heading_factor = clamp(1.0 - 0.35 * abs(bearing), 0.25, 1.0)
+                obstacle_factor = clamp(1.0 - center_prox, 0.2, 1.0)
+                commanded_speed = self.cruise_speed * heading_factor + (SHARK_MAX_LINEAR_SPEED * self.max_speed_scale - self.cruise_speed) * obstacle_factor
+                cmd.linear.x = clamp(commanded_speed, 0.0, SHARK_MAX_LINEAR_SPEED * self.max_speed_scale)
 
             now = self.get_clock().now()
             if (now - self.last_target_log_time).nanoseconds / 1e9 >= 1.0:
                 distance = distance_xy(self.shark.x, self.shark.y, target["x"], target["y"])
                 self.get_logger().info(
-                    f"[AUTO] target={target['fish_id']} dist={distance:.2f} bearing={bearing:.2f}"
+                    f"[AUTO] target={target['fish_id']} dist={distance:.2f} bearing={bearing:.2f} v={cmd.linear.x:.2f} w={cmd.angular.z:.2f}"
                 )
                 self.last_target_log_time = now
 

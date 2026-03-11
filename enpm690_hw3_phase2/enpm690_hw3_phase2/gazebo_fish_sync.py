@@ -252,8 +252,6 @@ class GazeboFishSync(Node):
             self._last_error_log_time = now
 
     def _publish_ready(self, ready: bool) -> None:
-        if ready == self._last_ready_state:
-            return
         self.ready_pub.publish(Bool(data=ready))
         self._last_ready_state = ready
 
