@@ -19,7 +19,7 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import LaserScan
-from simulation_interfaces.msg import EntityFilters, EntityState, Resource, SimulationState
+from simulation_interfaces.msg import EntityFilters, Resource, SimulationState
 from simulation_interfaces.srv import (
     DeleteEntity,
     GetEntities,
@@ -469,25 +469,15 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
         self._call_service(self.node.set_entity_state_client, request, timeout_sec=self.stack_timeout)
 
     def _set_robot_state(self, shark: SharkState, zero_twist: bool = True) -> None:
-        request = SetEntityState.Request()
-        request.entity = self.robot_name
-        request.state = EntityState()
-        request.state.header.frame_id = "world"
-        request.state.pose.position.x = shark.x
-        request.state.pose.position.y = shark.y
-        request.state.pose.position.z = 0.08
-        request.state.pose.orientation.z = math.sin(shark.heading / 2.0)
-        request.state.pose.orientation.w = math.cos(shark.heading / 2.0)
-        if zero_twist:
-            request.state.twist.linear.x = 0.0
-            request.state.twist.linear.y = 0.0
-            request.state.twist.linear.z = 0.0
-            request.state.twist.angular.x = 0.0
-            request.state.twist.angular.y = 0.0
-            request.state.twist.angular.z = 0.0
-        request.set_pose = True
-        request.set_twist = True
-        request.set_acceleration = False
+        request = make_set_entity_state_request(
+            entity_name=self.robot_name,
+            x=shark.x,
+            y=shark.y,
+            active=True,
+            z_active=0.08,
+            heading=shark.heading,
+            zero_twist=zero_twist,
+        )
         self._call_service(self.node.set_entity_state_client, request, timeout_sec=self.stack_timeout)
 
     def _publish_zero_command(self) -> None:

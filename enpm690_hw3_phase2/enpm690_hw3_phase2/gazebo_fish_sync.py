@@ -10,7 +10,7 @@ import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 from simulation_interfaces.srv import DeleteEntity, GetEntities, SetEntityState, SpawnEntity
 
 from .gazebo_fish_utils import (
@@ -34,6 +34,7 @@ class GazeboFishSync(Node):
         self.declare_parameter("moving_sync_distance", 0.015)
         self.declare_parameter("static_sync_distance", 0.05)
         self.declare_parameter("max_sync_staleness", 0.5)
+        self.declare_parameter("ready_topic", "/phase2/fish_sync_ready")
 
         self.fish_state_topic = str(self.get_parameter("fish_state_topic").value)
         self.startup_timeout = float(self.get_parameter("startup_timeout").value)
@@ -44,6 +45,7 @@ class GazeboFishSync(Node):
         self.moving_sync_distance = float(self.get_parameter("moving_sync_distance").value)
         self.static_sync_distance = float(self.get_parameter("static_sync_distance").value)
         self.max_sync_staleness = float(self.get_parameter("max_sync_staleness").value)
+        self.ready_topic = str(self.get_parameter("ready_topic").value)
         self.model_paths = fish_model_paths()
         self.known_entities: set[str] = set()
         self.last_synced_state: dict[str, tuple[float, float, bool, float]] = {}
@@ -52,8 +54,10 @@ class GazeboFishSync(Node):
         self._last_wait_log_time = 0.0
         self._last_refresh_time = 0.0
         self._last_error_log_time = 0.0
+        self._last_ready_state = False
         self._callback_group = ReentrantCallbackGroup()
 
+        self.ready_pub = self.create_publisher(Bool, self.ready_topic, 10)
         self.spawn_entity_client = self.create_client(SpawnEntity, "/gzserver/spawn_entity", callback_group=self._callback_group)
         self.delete_entity_client = self.create_client(DeleteEntity, "/gzserver/delete_entity", callback_group=self._callback_group)
         self.get_entities_client = self.create_client(GetEntities, "/gzserver/get_entities", callback_group=self._callback_group)
@@ -74,6 +78,7 @@ class GazeboFishSync(Node):
         now = time.time()
         if not ready:
             self._services_ready = False
+            self._publish_ready(False)
             if now - self._last_wait_log_time >= 5.0:
                 self.get_logger().info("waiting for Gazebo fish sync services...")
                 self._last_wait_log_time = now
@@ -89,8 +94,10 @@ class GazeboFishSync(Node):
         try:
             self._ensure_fish_entities(self._pending_fish_list)
             self._sync_known_fish(self._pending_fish_list)
+            self._publish_ready(self._all_active_fish_present())
         except Exception as exc:
             self._services_ready = False
+            self._publish_ready(False)
             self._log_sync_warning(f"fish sync failed, will retry: {exc}")
 
     def _call_service(self, client, request, timeout_sec: float = 5.0):
@@ -117,6 +124,8 @@ class GazeboFishSync(Node):
             return
 
         self._pending_fish_list = fish_list
+        if not self._services_ready:
+            self._publish_ready(False)
 
     def _refresh_known_entities(self) -> None:
         response = self._call_service(self.get_entities_client, make_get_entities_request(), timeout_sec=self.service_timeout)
@@ -165,6 +174,14 @@ class GazeboFishSync(Node):
             if not self._should_sync_fish(fish):
                 continue
             self._sync_single_fish(fish)
+
+    def _all_active_fish_present(self) -> bool:
+        active_ids = {
+            str(fish.get("fish_id"))
+            for fish in self._pending_fish_list
+            if fish.get("fish_id") and bool(fish.get("active", False))
+        }
+        return bool(active_ids) and active_ids.issubset(self.known_entities)
 
     def _should_sync_fish(self, fish: dict) -> bool:
         fish_id = fish.get("fish_id")
@@ -233,6 +250,12 @@ class GazeboFishSync(Node):
         if now - self._last_error_log_time >= 1.0:
             self.get_logger().warning(message)
             self._last_error_log_time = now
+
+    def _publish_ready(self, ready: bool) -> None:
+        if ready == self._last_ready_state:
+            return
+        self.ready_pub.publish(Bool(data=ready))
+        self._last_ready_state = ready
 
 
 def main() -> None:

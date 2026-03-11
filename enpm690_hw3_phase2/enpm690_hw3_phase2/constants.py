@@ -160,6 +160,7 @@ class GameSnapshot:
     score: int
     time_remaining: float
     shark: SharkState
+    sync_ready: bool = False
     catch_counts: dict[str, int] = field(default_factory=lambda: {"tuna": 0, "sardine": 0, "seaweed": 0})
     collision_cooldown: float = 0.0
     current_target_id: str = ""
@@ -171,6 +172,7 @@ class GameSnapshot:
             "score": self.score,
             "time_remaining": self.time_remaining,
             "shark": self.shark.to_dict(),
+            "sync_ready": self.sync_ready,
             "catch_counts": dict(self.catch_counts),
             "collision_cooldown": self.collision_cooldown,
             "current_target_id": self.current_target_id,

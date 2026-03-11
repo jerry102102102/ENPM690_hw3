@@ -73,6 +73,9 @@ class SharkAutoController(Node):
             return
 
         game_state = game_snapshot_from_json(self.game_state_payload)
+        if not bool(game_state.get("sync_ready", True)):
+            self.cmd_pub.publish(Twist())
+            return
         cooldown = float(game_state.get("collision_cooldown", 0.0))
         if cooldown > 0.0:
             self.cmd_pub.publish(Twist())

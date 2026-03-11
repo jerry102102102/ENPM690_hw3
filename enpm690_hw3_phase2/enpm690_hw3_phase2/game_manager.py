@@ -10,7 +10,7 @@ from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
-from std_msgs.msg import Float32, Int32, String
+from std_msgs.msg import Bool, Float32, Int32, String
 
 from .constants import (
     GAME_DT,
@@ -50,6 +50,7 @@ class GameManager(Node):
         self.declare_parameter("catch_event_topic", "/phase2/catch_event")
         self.declare_parameter("fish_state_topic", "/phase2/fish_state_json")
         self.declare_parameter("game_state_topic", "/phase2/game_state_json")
+        self.declare_parameter("fish_sync_ready_topic", "/phase2/fish_sync_ready")
         self.declare_parameter("auto_reset", True)
 
         self.mode = str(self.get_parameter("mode").value)
@@ -70,6 +71,8 @@ class GameManager(Node):
         self.catch_counts = {"tuna": 0, "sardine": 0, "seaweed": 0}
         self.current_target_id = ""
         self.current_target_species = ""
+        self.waiting_for_sync = self.mode != MODE_TRAIN
+        self._logged_waiting_for_sync = False
 
         self.score_pub = self.create_publisher(Int32, str(self.get_parameter("score_topic").value), 10)
         self.time_pub = self.create_publisher(Float32, str(self.get_parameter("time_topic").value), 10)
@@ -82,6 +85,7 @@ class GameManager(Node):
         self.create_subscription(Twist, self.cmd_input_topic, self._cmd_input_callback, 10)
         self.create_subscription(Odometry, "/odom", self._odom_callback, 20)
         self.create_subscription(LaserScan, "/scan", self._scan_callback, 10)
+        self.create_subscription(Bool, str(self.get_parameter("fish_sync_ready_topic").value), self._fish_sync_ready_callback, 10)
         self.create_timer(self.dt, self._tick)
 
         self.reset_episode(initial=True)
@@ -94,6 +98,8 @@ class GameManager(Node):
         self.current_target_id = ""
         self.current_target_species = ""
         self.shark.collision_cooldown = 0.0
+        self.waiting_for_sync = self.mode != MODE_TRAIN
+        self._logged_waiting_for_sync = False
         if initial:
             self.get_logger().info(f"[GAME] episode started mode={self.mode}")
         else:
@@ -119,7 +125,24 @@ class GameManager(Node):
     def _scan_callback(self, msg: LaserScan) -> None:
         self.latest_scan = msg
 
+    def _fish_sync_ready_callback(self, msg: Bool) -> None:
+        if self.mode == MODE_TRAIN:
+            return
+        if self.waiting_for_sync and msg.data:
+            self.waiting_for_sync = False
+            self._logged_waiting_for_sync = False
+            self.get_logger().info("[GAME] fish visuals ready, starting episode")
+
     def _tick(self) -> None:
+        if self.waiting_for_sync:
+            self.cmd_output_pub.publish(Twist())
+            self._update_target_snapshot()
+            self._publish_status()
+            if not self._logged_waiting_for_sync:
+                self.get_logger().info("[GAME] waiting for fish visuals to finish spawning")
+                self._logged_waiting_for_sync = True
+            return
+
         collision = False
         if self.shark.collision_cooldown <= 0.0 and self.collision_monitor.check_collision(self.shark):
             self.shark.collision_cooldown = SHARK_STUN_SECONDS
@@ -189,6 +212,7 @@ class GameManager(Node):
             score=self.score,
             time_remaining=self.time_remaining,
             shark=self.shark,
+            sync_ready=not self.waiting_for_sync,
             catch_counts=self.catch_counts,
             collision_cooldown=self.shark.collision_cooldown,
             current_target_id=self.current_target_id,

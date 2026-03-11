@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
@@ -67,22 +68,44 @@ def make_delete_entity_request(entity_name: str) -> DeleteEntity.Request:
     return request
 
 
-def make_set_entity_state_request(entity_name: str, x: float, y: float, active: bool, z_active: float = 0.15) -> SetEntityState.Request:
+def make_set_entity_state_request(
+    entity_name: str,
+    x: float,
+    y: float,
+    active: bool,
+    z_active: float = 0.15,
+    heading: float = 0.0,
+    zero_twist: bool = True,
+) -> SetEntityState.Request:
     request = SetEntityState.Request()
-    request.entity = entity_name
+    if hasattr(request, "entity"):
+        request.entity = entity_name
+    elif hasattr(request, "name"):
+        request.name = entity_name
+    else:
+        raise AttributeError(
+            "SetEntityState request does not expose a supported entity field. "
+            "Expected one of: entity, name."
+        )
     request.state = EntityState()
     request.state.header.frame_id = "world"
     request.state.pose.position.x = x
     request.state.pose.position.y = y
     request.state.pose.position.z = z_active if active else -2.0
+    request.state.pose.orientation.z = math.sin(heading / 2.0)
     request.state.pose.orientation.w = 1.0
-    request.state.twist.linear.x = 0.0
-    request.state.twist.linear.y = 0.0
-    request.state.twist.linear.z = 0.0
-    request.state.twist.angular.x = 0.0
-    request.state.twist.angular.y = 0.0
-    request.state.twist.angular.z = 0.0
-    request.set_pose = True
-    request.set_twist = True
-    request.set_acceleration = False
+    request.state.pose.orientation.w = math.cos(heading / 2.0)
+    if zero_twist:
+        request.state.twist.linear.x = 0.0
+        request.state.twist.linear.y = 0.0
+        request.state.twist.linear.z = 0.0
+        request.state.twist.angular.x = 0.0
+        request.state.twist.angular.y = 0.0
+        request.state.twist.angular.z = 0.0
+    if hasattr(request, "set_pose"):
+        request.set_pose = True
+    if hasattr(request, "set_twist"):
+        request.set_twist = zero_twist
+    if hasattr(request, "set_acceleration"):
+        request.set_acceleration = False
     return request
