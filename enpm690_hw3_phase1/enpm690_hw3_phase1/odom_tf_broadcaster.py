@@ -19,12 +19,18 @@ class OdomTfBroadcaster(Node):
         self._parent_frame = str(self.get_parameter("parent_frame").value)
         self._default_child_frame = str(self.get_parameter("default_child_frame").value)
         odom_topic = str(self.get_parameter("odom_topic").value)
+        self._last_stamp_ns = -1
 
         self._broadcaster = TransformBroadcaster(self)
         self.create_subscription(Odometry, odom_topic, self._odom_callback, 20)
         self.get_logger().info("bridging %s into /tf" % odom_topic)
 
     def _odom_callback(self, msg: Odometry) -> None:
+        stamp_ns = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
+        if stamp_ns <= self._last_stamp_ns:
+            return
+        self._last_stamp_ns = stamp_ns
+
         transform = TransformStamped()
         transform.header.stamp = msg.header.stamp
         transform.header.frame_id = msg.header.frame_id or self._parent_frame

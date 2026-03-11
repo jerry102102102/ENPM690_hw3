@@ -88,6 +88,6 @@ def generate_launch_description() -> LaunchDescription:
             odom_tf,
             teleop_logger,
             TimerAction(period=3.0, actions=[spawn]),
-            rviz,
+            TimerAction(period=5.0, actions=[rviz]),
         ]
     )
