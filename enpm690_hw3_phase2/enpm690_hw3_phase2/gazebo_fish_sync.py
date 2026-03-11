@@ -6,6 +6,8 @@ import json
 import time
 
 import rclpy
+from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from std_msgs.msg import String
 from simulation_interfaces.srv import GetEntities, SetEntityState, SpawnEntity
@@ -31,13 +33,14 @@ class GazeboFishSync(Node):
         self._services_ready = False
         self._pending_fish_list: list[dict] = []
         self._last_wait_log_time = 0.0
+        self._callback_group = ReentrantCallbackGroup()
 
-        self.spawn_entity_client = self.create_client(SpawnEntity, "/gzserver/spawn_entity")
-        self.get_entities_client = self.create_client(GetEntities, "/gzserver/get_entities")
-        self.set_entity_state_client = self.create_client(SetEntityState, "/gzserver/set_entity_state")
+        self.spawn_entity_client = self.create_client(SpawnEntity, "/gzserver/spawn_entity", callback_group=self._callback_group)
+        self.get_entities_client = self.create_client(GetEntities, "/gzserver/get_entities", callback_group=self._callback_group)
+        self.set_entity_state_client = self.create_client(SetEntityState, "/gzserver/set_entity_state", callback_group=self._callback_group)
 
-        self.create_subscription(String, self.fish_state_topic, self._fish_state_callback, 10)
-        self.create_timer(0.5, self._startup_tick)
+        self.create_subscription(String, self.fish_state_topic, self._fish_state_callback, 10, callback_group=self._callback_group)
+        self.create_timer(0.5, self._startup_tick, callback_group=self._callback_group)
         self.get_logger().info(f"gazebo fish sync listening on {self.fish_state_topic}")
 
     def _startup_tick(self) -> None:
@@ -60,9 +63,13 @@ class GazeboFishSync(Node):
         self._services_ready = True
         self.get_logger().info("Gazebo fish sync services are ready")
         if self._pending_fish_list:
-            self._ensure_fish_entities(self._pending_fish_list)
-            for fish in self._pending_fish_list:
-                self._sync_single_fish(fish)
+            try:
+                self._ensure_fish_entities(self._pending_fish_list)
+                for fish in self._pending_fish_list:
+                    self._sync_single_fish(fish)
+            except Exception as exc:
+                self._services_ready = False
+                self.get_logger().warning(f"initial fish sync failed, will retry: {exc}")
 
     def _call_service(self, client, request, timeout_sec: float = 5.0):
         future = client.call_async(request)
@@ -90,9 +97,13 @@ class GazeboFishSync(Node):
         self._pending_fish_list = fish_list
         if not self._services_ready:
             return
-        self._ensure_fish_entities(fish_list)
-        for fish in fish_list:
-            self._sync_single_fish(fish)
+        try:
+            self._ensure_fish_entities(fish_list)
+            for fish in fish_list:
+                self._sync_single_fish(fish)
+        except Exception as exc:
+            self._services_ready = False
+            self.get_logger().warning(f"fish sync failed, waiting for services again: {exc}")
 
     def _refresh_known_entities(self) -> None:
         response = self._call_service(self.get_entities_client, make_get_entities_request())
@@ -152,12 +163,17 @@ class GazeboFishSync(Node):
 def main() -> None:
     rclpy.init()
     node = None
+    executor = None
     try:
         node = GazeboFishSync()
-        rclpy.spin(node)
+        executor = MultiThreadedExecutor(num_threads=2)
+        executor.add_node(node)
+        executor.spin()
     except KeyboardInterrupt:
         pass
     finally:
+        if executor is not None:
+            executor.shutdown()
         if node is not None:
             node.destroy_node()
         rclpy.shutdown()
