@@ -42,6 +42,7 @@ def main() -> None:
                 headless=args.headless,
                 enable_fish_visuals=not args.headless,
                 robot_name="tb3_phase2_train" if args.headless else "tb3_phase2_eval",
+                command_topic="/cmd_vel",
             )
             env_name = "gazebo"
         model = PPO.load(str(args.model))

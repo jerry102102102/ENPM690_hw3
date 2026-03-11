@@ -60,11 +60,14 @@ def main() -> None:
                 stack_timeout=args.stack_timeout,
                 headless=args.headless,
                 enable_fish_visuals=False,
+                command_topic="/cmd_vel",
             )
             env_name = "gazebo"
         check_env(env, warn=True)
         _run_random_smoke(env)
         _run_scripted_smoke(env)
+        if isinstance(env, GazeboSharkHuntEnv):
+            env.run_motion_smoke_test()
 
         model = PPO("MlpPolicy", env, verbose=1, tensorboard_log=str(args.output_dir / "tensorboard"))
         model.learn(total_timesteps=args.timesteps)

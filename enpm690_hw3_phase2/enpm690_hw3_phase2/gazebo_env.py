@@ -6,7 +6,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 import gymnasium as gym
 import numpy as np
@@ -52,9 +52,10 @@ from .shark_collision_monitor import SharkCollisionMonitor
 
 
 class _GazeboTrainingNode(Node):
-    def __init__(self, robot_name: str) -> None:
+    def __init__(self, robot_name: str, command_topic: str = "/cmd_vel") -> None:
         super().__init__("gazebo_shark_hunt_env")
         self.robot_name = robot_name
+        self.command_topic = command_topic
         self.latest_scan: LaserScan | None = None
         self.latest_odom: Odometry | None = None
         self.latest_clock: Clock | None = None
@@ -62,7 +63,7 @@ class _GazeboTrainingNode(Node):
         self.odom_count = 0
         self.clock_count = 0
 
-        self.cmd_pub = self.create_publisher(Twist, "/cmd_vel_input", 10)
+        self.cmd_pub = self.create_publisher(Twist, self.command_topic, 10)
         self.create_subscription(LaserScan, "/scan", self._scan_callback, 20)
         self.create_subscription(Odometry, "/odom", self._odom_callback, 20)
         self.create_subscription(Clock, "/clock", self._clock_callback, 20)
@@ -100,6 +101,8 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
         stack_timeout: float = 45.0,
         enable_fish_visuals: bool = True,
         robot_name: str | None = None,
+        command_topic: str = "/cmd_vel",
+        launch_log_mode: str = "silent",
     ) -> None:
         super().__init__()
         self.launch_stack = launch_stack
@@ -107,6 +110,8 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
         self.stack_timeout = stack_timeout
         self.enable_fish_visuals = enable_fish_visuals
         self.robot_name = robot_name or ("tb3_phase2_train" if headless else "tb3_phase2_eval")
+        self.command_topic = command_topic
+        self.launch_log_mode = launch_log_mode
 
         low = np.array(
             [0.0, 0.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0]
@@ -137,6 +142,7 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
         self.time_remaining = GAME_DURATION_SECONDS
 
         self.launch_process: subprocess.Popen[str] | None = None
+        self.launch_log_handle: TextIO | None = None
         if self.launch_stack:
             self.launch_process = self._launch_stack_process()
 
@@ -145,7 +151,7 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
             rclpy.init()
             self._rclpy_owner = True
 
-        self.node = _GazeboTrainingNode(self.robot_name)
+        self.node = _GazeboTrainingNode(self.robot_name, self.command_topic)
         self.executor = MultiThreadedExecutor(num_threads=2)
         self.executor.add_node(self.node)
         self.spin_thread = threading.Thread(target=self.executor.spin, daemon=True)
@@ -258,15 +264,32 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
                 self.launch_process.wait(timeout=5.0)
             except subprocess.TimeoutExpired:
                 self.launch_process.kill()
+        if self.launch_log_handle is not None:
+            self.launch_log_handle.close()
         if self._rclpy_owner and rclpy.ok():
             rclpy.shutdown()
 
     def _launch_stack_process(self) -> subprocess.Popen[str]:
         launch_file = "phase2_train.launch.py" if self.headless else "phase2_eval.launch.py"
+        stdout_target: int | TextIO
+        stderr_target: int | TextIO
+        if self.launch_log_mode == "inherit":
+            stdout_target = None  # type: ignore[assignment]
+            stderr_target = None  # type: ignore[assignment]
+        elif self.launch_log_mode == "file":
+            log_dir = Path("artifacts/phase2_stack_logs")
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_path = log_dir / f"{launch_file.replace('.launch.py', '')}.log"
+            self.launch_log_handle = log_path.open("a")
+            stdout_target = self.launch_log_handle
+            stderr_target = self.launch_log_handle
+        else:
+            stdout_target = subprocess.DEVNULL
+            stderr_target = subprocess.DEVNULL
         return subprocess.Popen(
             ["ros2", "launch", "enpm690_hw3_phase2", launch_file],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=stdout_target,
+            stderr=stderr_target,
             text=True,
         )
 
@@ -290,9 +313,22 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
         while time.time() < deadline:
             if self.node.latest_scan is not None and self.node.latest_odom is not None:
                 self._call_service(self.node.get_sim_state_client, GetSimulationState.Request(), timeout_sec=5.0)
-                return
+                if self._command_topic_has_subscriber():
+                    return
             time.sleep(0.1)
-        raise RuntimeError("Gazebo training stack is not ready: missing /scan or /odom.")
+        if self.node.latest_scan is None or self.node.latest_odom is None:
+            raise RuntimeError("Gazebo training stack is not ready: missing /scan or /odom.")
+        raise RuntimeError(
+            f"Gazebo training stack is ready for sensors/services, but the shark command topic "
+            f"{self.command_topic} has no subscriber. Check whether training should publish to /cmd_vel "
+            f"or whether a command-gating node is missing."
+        )
+
+    def _command_topic_has_subscriber(self) -> bool:
+        topic_names_and_types = dict(self.node.get_topic_names_and_types())
+        if self.command_topic not in topic_names_and_types:
+            return False
+        return self.node.count_subscribers(self.command_topic) > 0
 
     def _call_service(self, client, request, timeout_sec: float = 5.0):
         future = client.call_async(request)
@@ -478,3 +514,20 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
 
     def _publish_zero_command(self) -> None:
         self.node.cmd_pub.publish(Twist())
+
+    def run_motion_smoke_test(self, steps: int = 5, action: np.ndarray | None = None) -> None:
+        if action is None:
+            action = np.array([-0.4, 0.0], dtype=np.float32)
+        observation, _ = self.reset()
+        start_x = self.shark.x
+        start_y = self.shark.y
+        for _ in range(steps):
+            observation, reward, terminated, truncated, info = self.step(action)
+            if terminated or truncated:
+                break
+        moved = math.hypot(self.shark.x - start_x, self.shark.y - start_y)
+        if moved < 0.02:
+            raise RuntimeError(
+                f"Gazebo motion smoke test failed: shark odometry did not change enough on {self.command_topic}. "
+                f"Moved only {moved:.4f} m. Check the command topic path and robot command subscriber."
+            )
