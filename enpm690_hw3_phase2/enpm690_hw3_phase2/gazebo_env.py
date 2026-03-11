@@ -19,15 +19,12 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import LaserScan
-from simulation_interfaces.msg import EntityFilters, Resource, SimulationState
+from simulation_interfaces.msg import SimulationState
 from simulation_interfaces.srv import (
-    DeleteEntity,
-    GetEntities,
     GetSimulationState,
     ResetSimulation,
     SetEntityState,
     SetSimulationState,
-    SpawnEntity,
     StepSimulation,
 )
 
@@ -45,7 +42,7 @@ from .constants import (
     SharkState,
 )
 from .fish_manager import FishManager
-from .gazebo_fish_utils import fish_model_paths, make_get_entities_request, make_set_entity_state_request, make_spawn_entity_request
+from .gazebo_fish_utils import make_set_entity_state_request
 from .geometry_utils import angle_diff, bearing_xy, distance_xy
 from .observation_builder import ObservationBuilder
 from .reward_builder import RewardBuilder
@@ -73,9 +70,6 @@ class _GazeboTrainingNode(Node):
         self.step_client = self.create_client(StepSimulation, "/gzserver/step_simulation")
         self.get_sim_state_client = self.create_client(GetSimulationState, "/gzserver/get_simulation_state")
         self.set_sim_state_client = self.create_client(SetSimulationState, "/gzserver/set_simulation_state")
-        self.spawn_entity_client = self.create_client(SpawnEntity, "/gzserver/spawn_entity")
-        self.delete_entity_client = self.create_client(DeleteEntity, "/gzserver/delete_entity")
-        self.get_entities_client = self.create_client(GetEntities, "/gzserver/get_entities")
         self.set_entity_state_client = self.create_client(SetEntityState, "/gzserver/set_entity_state")
 
     def _scan_callback(self, msg: LaserScan) -> None:
@@ -158,7 +152,6 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
         self.spin_thread = threading.Thread(target=self.executor.spin, daemon=True)
         self.spin_thread.start()
 
-        self.fish_model_paths = self._fish_model_paths()
         self.entity_name_map: dict[str, str] = {}
         self._wait_for_stack_ready()
         self._set_paused_state()
@@ -301,9 +294,6 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
             self.node.step_client,
             self.node.get_sim_state_client,
             self.node.set_sim_state_client,
-            self.node.spawn_entity_client,
-            self.node.delete_entity_client,
-            self.node.get_entities_client,
             self.node.set_entity_state_client,
         ]
         for client in clients:
@@ -427,30 +417,12 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
             "time_remaining": self.time_remaining,
         }
 
-    def _fish_model_paths(self) -> dict[str, Path]:
-        return fish_model_paths()
-
-    def _get_entity_names(self) -> set[str]:
-        response = self._call_service(self.node.get_entities_client, make_get_entities_request(), timeout_sec=self.stack_timeout)
-        return set(response.entities)
-
     def _ensure_fish_entities(self) -> None:
         if not self.enable_fish_visuals:
             return
-        existing = self._get_entity_names()
         for fish in self.fish_manager.fish:
-            if fish.fish_id in existing:
-                self.entity_name_map[fish.fish_id] = fish.fish_id
-                continue
-            request = make_spawn_entity_request(
-                entity_name=fish.fish_id,
-                model_path=self.fish_model_paths[fish.species],
-                x=fish.x,
-                y=fish.y,
-            )
-            response = self._call_service(self.node.spawn_entity_client, request, timeout_sec=self.stack_timeout)
-            entity_name = getattr(response, "entity_name", fish.fish_id) or fish.fish_id
-            self.entity_name_map[fish.fish_id] = entity_name
+            # Phase 2 world now preloads fish visuals with stable names.
+            self.entity_name_map[fish.fish_id] = fish.fish_id
 
     def _sync_all_fish_to_gazebo(self) -> None:
         if not self.enable_fish_visuals:
