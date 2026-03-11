@@ -122,6 +122,7 @@ class SharkHuntLogicalEnv(gym.Env[np.ndarray, np.ndarray]):
             distance_before=distance_before,
             distance_after=distance_after,
             front_obstacle_proximity=front_prox,
+            speed_fraction=self.shark.linear_speed / max(SHARK_MAX_LINEAR_SPEED, 1e-6),
         )
 
         observation = self._build_observation(lidar)

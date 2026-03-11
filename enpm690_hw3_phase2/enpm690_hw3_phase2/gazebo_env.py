@@ -6,13 +6,12 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Any, TextIO
+from typing import TextIO
 
 import gymnasium as gym
 import numpy as np
 import rclpy
-from ament_index_python.packages import get_package_share_directory
-from geometry_msgs.msg import PoseStamped, Twist
+from geometry_msgs.msg import Twist
 from gymnasium import spaces
 from nav_msgs.msg import Odometry
 from rclpy.executors import MultiThreadedExecutor
@@ -33,20 +32,13 @@ from .constants import (
     GAME_DT,
     GAME_DURATION_SECONDS,
     LIDAR_BIN_COUNT,
-    PHASE2_OBSTACLES,
-    PHASE2_WORLD_BOUNDS,
     SHARK_MAX_ANGULAR_SPEED,
     SHARK_MAX_LINEAR_SPEED,
-    SHARK_RADIUS,
-    SHARK_STUN_SECONDS,
-    SharkState,
 )
-from .fish_manager import FishManager
 from .gazebo_fish_utils import make_set_entity_state_request
-from .geometry_utils import angle_diff, bearing_xy, distance_xy
+from .game_core import GameCore
 from .observation_builder import ObservationBuilder
 from .reward_builder import RewardBuilder
-from .shark_collision_monitor import SharkCollisionMonitor
 
 
 class _GazeboTrainingNode(Node):
@@ -127,14 +119,10 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
         self.max_steps = int(GAME_DURATION_SECONDS / self.dt)
         self.physics_steps_per_action = 10
         self.rng = random.Random(690)
-        self.fish_manager = FishManager(PHASE2_WORLD_BOUNDS, PHASE2_OBSTACLES, self.rng)
-        self.collision_monitor = SharkCollisionMonitor(PHASE2_WORLD_BOUNDS, PHASE2_OBSTACLES, SHARK_RADIUS)
+        self.game = GameCore(episode_duration=GAME_DURATION_SECONDS, dt=self.dt)
+        self.game.fish_manager.rng = self.rng
         self.reward_builder = RewardBuilder()
-        self.shark = SharkState()
         self.steps = 0
-        self.score = 0
-        self.catch_counts = {"tuna": 0, "sardine": 0, "seaweed": 0}
-        self.time_remaining = GAME_DURATION_SECONDS
 
         self.launch_process: subprocess.Popen[str] | None = None
         self.launch_log_handle: TextIO | None = None
@@ -164,64 +152,59 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
 
         self._set_paused_state()
         reset_request = ResetSimulation.Request()
-        reset_request.scope = ResetSimulation.Request.SCOPE_TIME | ResetSimulation.Request.SCOPE_STATE
+        # Resetting full simulation state can leave the robot sensors/bridge without fresh
+        # /scan and /odom updates on stepped Gazebo runs. We only need to rewind time here
+        # because the env explicitly repositions the robot and fish state below.
+        reset_request.scope = ResetSimulation.Request.SCOPE_TIME
         self._call_service(self.node.reset_client, reset_request, timeout_sec=self.stack_timeout)
 
-        self.shark = SharkState(x=DEFAULT_SHARK_SPAWN[0], y=DEFAULT_SHARK_SPAWN[1], heading=DEFAULT_SHARK_SPAWN[2])
+        self.game.reset()
+        self.game.shark.x = DEFAULT_SHARK_SPAWN[0]
+        self.game.shark.y = DEFAULT_SHARK_SPAWN[1]
+        self.game.shark.heading = DEFAULT_SHARK_SPAWN[2]
         self.steps = 0
-        self.score = 0
-        self.time_remaining = GAME_DURATION_SECONDS
-        self.catch_counts = {"tuna": 0, "sardine": 0, "seaweed": 0}
-        self.fish_manager.reset()
 
         self._publish_zero_command()
-        self._set_robot_state(self.shark)
+        self._set_robot_state(self.game.shark)
         self._ensure_fish_entities()
         self._sync_all_fish_to_gazebo()
         self._step_and_wait(self.physics_steps_per_action)
-        self._update_shark_from_odom()
+        self._update_shark_from_odom_into_game()
         observation = self._build_observation()
-        info = self._build_info(collision=False, reward_components={})
-        info["score"] = self.score
-        info["catch_counts"] = dict(self.catch_counts)
+        info = self.game.build_info(collision=False, reward_components={})
+        info["score"] = self.game.score
+        info["catch_counts"] = dict(self.game.catch_counts)
         return observation, info
 
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict]:
         action = np.asarray(action, dtype=np.float32)
         action = np.clip(action, -1.0, 1.0)
-        target_before = self._current_target()
-        distance_before = self._distance_to_target(target_before)
+        target_before = self.game.current_target()
+        distance_before = self.game.distance_to_target(target_before)
 
         cmd = Twist()
-        if self.shark.collision_cooldown > 0.0:
-            self.shark.collision_cooldown = max(0.0, self.shark.collision_cooldown - self.dt)
+        if self.game.consume_cooldown_tick():
+            cmd = Twist()
         else:
             cmd.linear.x = 0.5 * (float(action[0]) + 1.0) * SHARK_MAX_LINEAR_SPEED
             cmd.angular.z = float(action[1]) * SHARK_MAX_ANGULAR_SPEED
 
         self.node.cmd_pub.publish(cmd)
         self._step_and_wait(self.physics_steps_per_action)
-        self._update_shark_from_odom()
+        self._update_shark_from_odom_into_game()
 
-        collision = False
-        if self.shark.collision_cooldown <= 0.0 and self.collision_monitor.check_collision(self.shark):
-            collision = True
-            self.shark.collision_cooldown = SHARK_STUN_SECONDS
+        collision = self.game.trigger_collision_if_needed()
+        if collision:
             self._publish_zero_command()
-            self._set_robot_state(self.shark, zero_twist=True)
+            self._set_robot_state(self.game.shark, zero_twist=True)
 
-        self.fish_manager.update(self.dt, self.shark, immediate_respawn=True)
-        catches = self.fish_manager.detect_catches(self.shark, immediate_respawn=True)
+        catches = self.game.advance_episode(immediate_respawn=True)
         catch_score = sum(event.score_delta for event in catches)
-        for event in catches:
-            self.score += event.score_delta
-            self.catch_counts[event.species] += 1
 
         self._sync_all_fish_to_gazebo()
 
         self.steps += 1
-        self.time_remaining = max(0.0, GAME_DURATION_SECONDS - self.steps * self.dt)
-        distance_after = self._distance_to_target(target_before)
+        distance_after = self.game.distance_to_target(target_before)
         lidar = self._latest_lidar_proximity()
         _, front_prox, _ = ObservationBuilder.front_sector_proximities(lidar)
         reward, components = self.reward_builder.compute(
@@ -230,14 +213,15 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
             distance_before=distance_before,
             distance_after=distance_after,
             front_obstacle_proximity=front_prox,
+            speed_fraction=self.game.shark.linear_speed / max(SHARK_MAX_LINEAR_SPEED, 1e-6),
         )
 
         observation = self._build_observation(lidar)
         terminated = False
         truncated = self.steps >= self.max_steps
-        info = self._build_info(collision=collision, reward_components=components)
-        info["score"] = self.score
-        info["catch_counts"] = dict(self.catch_counts)
+        info = self.game.build_info(collision=collision, reward_components=components)
+        info["score"] = self.game.score
+        info["catch_counts"] = dict(self.game.catch_counts)
         return observation, float(reward), terminated, truncated, info
 
     def close(self) -> None:
@@ -353,18 +337,18 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
             time.sleep(0.01)
         raise TimeoutError("Timed out waiting for fresh /scan and /odom after stepping Gazebo.")
 
-    def _update_shark_from_odom(self) -> None:
+    def _update_shark_from_odom_into_game(self) -> None:
         odom = self.node.latest_odom
         if odom is None:
             raise RuntimeError("No /odom message available.")
-        self.shark.x = odom.pose.pose.position.x
-        self.shark.y = odom.pose.pose.position.y
+        self.game.shark.x = odom.pose.pose.position.x
+        self.game.shark.y = odom.pose.pose.position.y
         q = odom.pose.pose.orientation
         siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
         cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
-        self.shark.heading = math.atan2(siny_cosp, cosy_cosp)
-        self.shark.linear_speed = odom.twist.twist.linear.x
-        self.shark.angular_speed = odom.twist.twist.angular.z
+        self.game.shark.heading = math.atan2(siny_cosp, cosy_cosp)
+        self.game.shark.linear_speed = odom.twist.twist.linear.x
+        self.game.shark.angular_speed = odom.twist.twist.angular.z
 
     def _latest_lidar_proximity(self) -> np.ndarray:
         scan = self.node.latest_scan
@@ -375,59 +359,19 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
     def _build_observation(self, lidar: np.ndarray | None = None) -> np.ndarray:
         if lidar is None:
             lidar = self._latest_lidar_proximity()
-        return ObservationBuilder.build_vector(self.shark, self.time_remaining, lidar, self.fish_manager.fish)
-
-    def _current_target(self):
-        best = None
-        best_utility = -1.0
-        for species, score in (("tuna", 10.0), ("sardine", 3.0), ("seaweed", 1.0)):
-            candidate = self.fish_manager.nearest_active_by_species(species, self.shark)
-            if candidate is None:
-                continue
-            utility = score / (distance_xy(self.shark.x, self.shark.y, candidate.x, candidate.y) + 1e-3)
-            if utility > best_utility:
-                best = candidate
-                best_utility = utility
-        return best
-
-    def _distance_to_target(self, target) -> float | None:
-        if target is None:
-            return None
-        return distance_xy(self.shark.x, self.shark.y, target.x, target.y)
-
-    def _build_info(self, collision: bool, reward_components: dict[str, float]) -> dict[str, Any]:
-        target = self._current_target()
-        if target is None:
-            target_id = ""
-            target_species = ""
-            target_distance = None
-            target_bearing = None
-        else:
-            target_id = target.fish_id
-            target_species = target.species
-            target_distance = distance_xy(self.shark.x, self.shark.y, target.x, target.y)
-            target_bearing = angle_diff(bearing_xy(self.shark.x, self.shark.y, target.x, target.y), self.shark.heading)
-        return {
-            "collision": collision,
-            "reward_components": reward_components,
-            "target_id": target_id,
-            "target_species": target_species,
-            "target_distance": target_distance,
-            "target_bearing": target_bearing,
-            "time_remaining": self.time_remaining,
-        }
+        return ObservationBuilder.build_vector(self.game.shark, self.game.time_remaining, lidar, self.game.fish_manager.fish)
 
     def _ensure_fish_entities(self) -> None:
         if not self.enable_fish_visuals:
             return
-        for fish in self.fish_manager.fish:
+        for fish in self.game.fish_manager.fish:
             # Phase 2 world now preloads fish visuals with stable names.
             self.entity_name_map[fish.fish_id] = fish.fish_id
 
     def _sync_all_fish_to_gazebo(self) -> None:
         if not self.enable_fish_visuals:
             return
-        for fish in self.fish_manager.fish:
+        for fish in self.game.fish_manager.fish:
             self._set_fish_entity_state(fish)
 
     def _set_fish_entity_state(self, fish) -> None:
@@ -459,13 +403,13 @@ class GazeboSharkHuntEnv(gym.Env[np.ndarray, np.ndarray]):
         if action is None:
             action = np.array([-0.4, 0.0], dtype=np.float32)
         observation, _ = self.reset()
-        start_x = self.shark.x
-        start_y = self.shark.y
+        start_x = self.game.shark.x
+        start_y = self.game.shark.y
         for _ in range(steps):
             observation, reward, terminated, truncated, info = self.step(action)
             if terminated or truncated:
                 break
-        moved = math.hypot(self.shark.x - start_x, self.shark.y - start_y)
+        moved = math.hypot(self.game.shark.x - start_x, self.game.shark.y - start_y)
         if moved < 0.02:
             raise RuntimeError(
                 f"Gazebo motion smoke test failed: shark odometry did not change enough on {self.command_topic}. "

@@ -59,6 +59,7 @@ Default training now uses the Gazebo-backed environment.
 The old Python-only environment remains available only as a debug fallback.
 Use a project virtual environment for ML dependencies and run the training/evaluation entry points with
 `python -m ...`, not `ros2 run`.
+The play/auto `game_manager` path and the training env now share the same core episode state, fish, catch, target, and stun logic.
 
 Why this repo does that:
 

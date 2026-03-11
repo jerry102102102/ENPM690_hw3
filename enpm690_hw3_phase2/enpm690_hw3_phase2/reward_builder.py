@@ -9,6 +9,7 @@ class RewardBuilder:
         distance_before: float | None,
         distance_after: float | None,
         front_obstacle_proximity: float,
+        speed_fraction: float,
     ) -> tuple[float, dict[str, float]]:
         reward = -0.01
         components = {"time_penalty": -0.01}
@@ -34,5 +35,9 @@ class RewardBuilder:
             proximity_penalty = -0.1 * front_obstacle_proximity
             reward += proximity_penalty
             components["front_proximity_penalty"] = proximity_penalty
+
+        speed_bonus = 0.03 * max(0.0, speed_fraction)
+        reward += speed_bonus
+        components["speed_bonus"] = speed_bonus
 
         return reward, components

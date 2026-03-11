@@ -73,6 +73,7 @@ source install/setup.bash
 
 - play / demo 類 ROS runtime node 繼續用 `ros2 launch` / `ros2 run`
 - training / evaluation 類 ML scripts 改用 `python -m ...`
+- play/auto 的 `game_manager` 和 training env 共用同一套 game core，episode / fish / catch / target / stun 邏輯不再分兩份維護
 
 原因是：
 
