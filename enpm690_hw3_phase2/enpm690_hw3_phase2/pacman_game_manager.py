@@ -72,7 +72,9 @@ class PacmanGameManager(Node):
         self.game_over = False
         self.victory = False
         self._publish_state()
-        self.get_logger().info(f"[PACMAN] game started mode={self.mode}")
+        self.get_logger().info(
+            f"[PACMAN] game started mode={self.mode} pellets={self.pellet_manager.active_count()} ghost={self.ghost_manager.ghost.ghost_id}"
+        )
 
     def _odom_callback(self, msg: Odometry) -> None:
         self.robot_x = msg.pose.pose.position.x

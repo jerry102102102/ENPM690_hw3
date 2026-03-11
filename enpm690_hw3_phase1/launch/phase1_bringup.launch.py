@@ -37,7 +37,10 @@ def generate_launch_description() -> LaunchDescription:
 
     rviz = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(str(launch_dir / "rviz.launch.py")),
-        launch_arguments={"rviz_config": LaunchConfiguration("rviz_config")}.items(),
+        launch_arguments={
+            "rviz_config": LaunchConfiguration("rviz_config"),
+            "use_sim_time": LaunchConfiguration("rviz_use_sim_time"),
+        }.items(),
         condition=IfCondition(LaunchConfiguration("use_rviz")),
     )
 
@@ -82,6 +85,7 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("z", default_value="0.08"),
             DeclareLaunchArgument("yaw", default_value="0.0"),
             DeclareLaunchArgument("use_rviz", default_value="true"),
+            DeclareLaunchArgument("rviz_use_sim_time", default_value="false"),
             gazebo,
             bridge,
             robot_state_publisher,

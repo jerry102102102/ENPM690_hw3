@@ -26,6 +26,7 @@ def generate_launch_description() -> LaunchDescription:
             "z": "0.08",
             "yaw": "0.0",
             "use_rviz": "true",
+            "rviz_use_sim_time": "false",
         }.items(),
     )
 
@@ -37,13 +38,13 @@ def generate_launch_description() -> LaunchDescription:
                 package="enpm690_hw3_phase2",
                 executable="pacman_game_manager",
                 output="screen",
-                parameters=[params, {"use_sim_time": True, "mode": "teleop_play"}],
+                parameters=[params, {"use_sim_time": False, "mode": "teleop_play"}],
             ),
             Node(
                 package="enpm690_hw3_phase2",
                 executable="marker_publisher",
                 output="screen",
-                parameters=[params, {"use_sim_time": True}],
+                parameters=[params, {"use_sim_time": False}],
             ),
         ]
     )

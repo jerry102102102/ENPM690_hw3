@@ -54,6 +54,7 @@ class PacmanAutoController(Node):
         self.ghost_payload = "{}"
         self.game_payload = "{}"
         self.last_log_time = self.get_clock().now()
+        self.last_wait_log_time = self.get_clock().now()
 
         self.cmd_pub = self.create_publisher(Twist, self.cmd_topic, 10)
         self.create_subscription(Odometry, "/odom", self._odom_callback, 20)
@@ -87,16 +88,22 @@ class PacmanAutoController(Node):
 
     def _tick(self) -> None:
         if self.scan is None:
+            self._log_waiting("waiting for /scan")
             return
 
         game = json.loads(self.game_payload or "{}")
+        if not game:
+            self._log_waiting("waiting for /phase2/game_state_json")
+            return
         if game.get("game_over", False) or game.get("victory", False):
             self.cmd_pub.publish(Twist())
+            self._log_waiting("game finished, publishing zero cmd")
             return
 
         pellets = [pellet for pellet in json.loads(self.pellet_payload or "[]") if pellet.get("active", False)]
         if not pellets:
             self.cmd_pub.publish(Twist())
+            self._log_waiting("waiting for active pellets")
             return
 
         target = min(pellets, key=lambda pellet: distance_xy(self.robot_x, self.robot_y, pellet["x"], pellet["y"]))
@@ -160,6 +167,13 @@ class PacmanAutoController(Node):
             f"[AUTO] target={target['pellet_id']} dist={distance:.2f} v={cmd.linear.x:.2f} w={cmd.angular.z:.2f}"
         )
         self.last_log_time = now
+
+    def _log_waiting(self, message: str) -> None:
+        now = self.get_clock().now()
+        if (now - self.last_wait_log_time).nanoseconds / 1e9 < 1.0:
+            return
+        self.get_logger().info(f"[AUTO] {message}")
+        self.last_wait_log_time = now
 
 
 def main() -> None:
