@@ -105,14 +105,7 @@ class Obstacle:
 
 
 PHASE2_WORLD_BOUNDS = WorldBounds(x_min=-4.8, x_max=4.8, y_min=-4.8, y_max=4.8)
-PHASE2_OBSTACLES: tuple[Obstacle, ...] = (
-    Obstacle("center_reef", 1.2, 0.0, 1.0, 1.0),
-    Obstacle("north_reef", 0.0, 2.1, 1.2, 0.8),
-    Obstacle("south_reef", -0.6, -2.1, 1.2, 0.8),
-    Obstacle("east_column", 2.8, 1.8, 0.8, 1.4),
-    Obstacle("west_column", -2.6, 1.0, 0.9, 1.6),
-    Obstacle("lower_east_block", 2.5, -1.8, 1.0, 1.0),
-)
+PHASE2_OBSTACLES: tuple[Obstacle, ...] = ()
 
 DEFAULT_SHARK_SPAWN = (0.0, 0.0, 0.0)
 

@@ -37,6 +37,14 @@ class SectorProximities:
         return max(self.far_left, self.left, self.center, self.right, self.far_right)
 
 
+@dataclass(frozen=True)
+class LidarCluster:
+    center_angle: float
+    mean_range: float
+    beam_count: int
+    physical_width: float
+
+
 class SharkAutoController(Node):
     def __init__(self) -> None:
         super().__init__("shark_auto_controller")
@@ -59,6 +67,13 @@ class SharkAutoController(Node):
         self.declare_parameter("avoid_turn_speed", 1.25)
         self.declare_parameter("avoid_forward_speed", 0.16)
         self.declare_parameter("recover_turn_speed", 0.55)
+        self.declare_parameter("lidar_target_bias", 0.9)
+        self.declare_parameter("lidar_cluster_jump_distance", 0.22)
+        self.declare_parameter("lidar_cluster_min_beams", 2)
+        self.declare_parameter("lidar_cluster_max_beams", 18)
+        self.declare_parameter("lidar_cluster_max_width", 0.55)
+        self.declare_parameter("lidar_cluster_max_range", 3.0)
+        self.declare_parameter("lidar_front_fov_deg", 140.0)
 
         self.cmd_topic = str(self.get_parameter("cmd_topic").value)
         self.k_target = float(self.get_parameter("k_target").value)
@@ -79,6 +94,13 @@ class SharkAutoController(Node):
         self.avoid_turn_speed = float(self.get_parameter("avoid_turn_speed").value)
         self.avoid_forward_speed = float(self.get_parameter("avoid_forward_speed").value)
         self.recover_turn_speed = float(self.get_parameter("recover_turn_speed").value)
+        self.lidar_target_bias = float(self.get_parameter("lidar_target_bias").value)
+        self.lidar_cluster_jump_distance = float(self.get_parameter("lidar_cluster_jump_distance").value)
+        self.lidar_cluster_min_beams = int(self.get_parameter("lidar_cluster_min_beams").value)
+        self.lidar_cluster_max_beams = int(self.get_parameter("lidar_cluster_max_beams").value)
+        self.lidar_cluster_max_width = float(self.get_parameter("lidar_cluster_max_width").value)
+        self.lidar_cluster_max_range = float(self.get_parameter("lidar_cluster_max_range").value)
+        self.lidar_front_fov_deg = float(self.get_parameter("lidar_front_fov_deg").value)
 
         self.shark = SharkState()
         self.scan: LaserScan | None = None
@@ -144,24 +166,26 @@ class SharkAutoController(Node):
             LIDAR_BIN_COUNT,
         )
         sectors = self._sector_proximities(lidar)
+        lidar_cluster = self._best_lidar_target_cluster()
         target_bearing = 0.0 if target is None else angle_diff(
             bearing_xy(self.shark.x, self.shark.y, target["x"], target["y"]),
             self.shark.heading,
         )
         target_turn = self.k_target * target_bearing
+        lidar_turn = 0.0 if lidar_cluster is None else self.lidar_target_bias * lidar_cluster.center_angle
         self._update_mode(sectors)
         reactive_turn = self._braitenberg_turn(sectors)
 
         cmd = Twist()
         if target is None:
             cmd.linear.x = self._effective_cruise_speed()
-            cmd.angular.z = clamp(0.7 * reactive_turn, -SHARK_MAX_ANGULAR_SPEED, SHARK_MAX_ANGULAR_SPEED)
+            cmd.angular.z = clamp(lidar_turn + 0.7 * reactive_turn, -SHARK_MAX_ANGULAR_SPEED, SHARK_MAX_ANGULAR_SPEED)
         elif self.mode == "avoid":
             cmd = self._build_avoid_command(reactive_turn, sectors)
         elif self.mode == "recover":
-            cmd = self._build_recover_command(target_turn, reactive_turn, sectors)
+            cmd = self._build_recover_command(target_turn, lidar_turn, reactive_turn, sectors)
         else:
-            cmd = self._build_chase_command(target_turn, reactive_turn, target_bearing, sectors)
+            cmd = self._build_chase_command(target_turn, lidar_turn, reactive_turn, target_bearing, sectors)
 
         now = self.get_clock().now()
         if target is not None and (now - self.last_target_log_time).nanoseconds / 1e9 >= 1.0:
@@ -210,12 +234,17 @@ class SharkAutoController(Node):
     def _build_chase_command(
         self,
         target_turn: float,
+        lidar_turn: float,
         reactive_turn: float,
         target_bearing: float,
         sectors: SectorProximities,
     ) -> Twist:
         cmd = Twist()
-        cmd.angular.z = clamp(target_turn + 0.65 * reactive_turn, -SHARK_MAX_ANGULAR_SPEED, SHARK_MAX_ANGULAR_SPEED)
+        cmd.angular.z = clamp(
+            target_turn + 0.55 * lidar_turn + 0.65 * reactive_turn,
+            -SHARK_MAX_ANGULAR_SPEED,
+            SHARK_MAX_ANGULAR_SPEED,
+        )
         if self._sector_distance(sectors.center) <= self._effective_turn_in_place_distance():
             cmd.linear.x = 0.0
             return cmd
@@ -247,12 +276,13 @@ class SharkAutoController(Node):
     def _build_recover_command(
         self,
         target_turn: float,
+        lidar_turn: float,
         reactive_turn: float,
         sectors: SectorProximities,
     ) -> Twist:
         cmd = Twist()
         cmd.angular.z = clamp(
-            0.55 * target_turn + 0.5 * reactive_turn + self.recover_turn_speed * self.avoid_direction,
+            0.45 * target_turn + 0.45 * lidar_turn + 0.5 * reactive_turn + self.recover_turn_speed * self.avoid_direction,
             -SHARK_MAX_ANGULAR_SPEED,
             SHARK_MAX_ANGULAR_SPEED,
         )
@@ -364,6 +394,91 @@ class SharkAutoController(Node):
         if self.scan is None:
             return float("inf")
         return max(self.scan.range_min, (1.0 - proximity) * self.scan.range_max)
+
+    def _best_lidar_target_cluster(self) -> LidarCluster | None:
+        if self.scan is None:
+            return None
+        clusters = self._extract_lidar_clusters(self.scan)
+        best_cluster = None
+        best_score = float("-inf")
+        for cluster in clusters:
+            score = (
+                2.2 / max(cluster.mean_range, 0.15)
+                - 0.9 * abs(cluster.center_angle)
+                - 0.7 * cluster.physical_width
+            )
+            if score > best_score:
+                best_score = score
+                best_cluster = cluster
+        return best_cluster
+
+    def _extract_lidar_clusters(self, scan: LaserScan) -> list[LidarCluster]:
+        front_half_fov = math.radians(self.lidar_front_fov_deg) / 2.0
+        points: list[tuple[int, float, float]] = []
+        for index, raw_range in enumerate(scan.ranges):
+            if not math.isfinite(raw_range):
+                continue
+            if raw_range < scan.range_min or raw_range > min(scan.range_max, self.lidar_cluster_max_range):
+                continue
+            angle = scan.angle_min + index * scan.angle_increment
+            if abs(angle) > front_half_fov:
+                continue
+            points.append((index, raw_range, angle))
+        if not points:
+            return []
+
+        clusters: list[list[tuple[int, float, float]]] = []
+        current_cluster = [points[0]]
+        for point in points[1:]:
+            prev_point = current_cluster[-1]
+            if self._cluster_break(scan.angle_increment, prev_point, point):
+                clusters.append(current_cluster)
+                current_cluster = [point]
+            else:
+                current_cluster.append(point)
+        clusters.append(current_cluster)
+
+        output: list[LidarCluster] = []
+        for cluster_points in clusters:
+            if not (self.lidar_cluster_min_beams <= len(cluster_points) <= self.lidar_cluster_max_beams):
+                continue
+            ranges = [point[1] for point in cluster_points]
+            start_angle = cluster_points[0][2]
+            end_angle = cluster_points[-1][2]
+            mean_range = sum(ranges) / len(ranges)
+            angular_span = abs(end_angle - start_angle)
+            physical_width = 2.0 * mean_range * math.sin(angular_span / 2.0)
+            if physical_width > self.lidar_cluster_max_width:
+                continue
+            center_angle = sum(point[2] for point in cluster_points) / len(cluster_points)
+            output.append(
+                LidarCluster(
+                    center_angle=center_angle,
+                    mean_range=mean_range,
+                    beam_count=len(cluster_points),
+                    physical_width=physical_width,
+                )
+            )
+        return output
+
+    def _cluster_break(
+        self,
+        angle_increment: float,
+        previous_point: tuple[int, float, float],
+        current_point: tuple[int, float, float],
+    ) -> bool:
+        prev_index, prev_range, _ = previous_point
+        curr_index, curr_range, _ = current_point
+        beam_gap = curr_index - prev_index
+        if beam_gap > 1:
+            return True
+        angle_gap = max(angle_increment * beam_gap, 1e-6)
+        euclidean_gap = math.sqrt(
+            prev_range * prev_range
+            + curr_range * curr_range
+            - 2.0 * prev_range * curr_range * math.cos(angle_gap)
+        )
+        return euclidean_gap > self.lidar_cluster_jump_distance
 
 
 def main() -> None:

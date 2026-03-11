@@ -34,6 +34,13 @@ shark_auto_controller:
     avoid_turn_speed: 1.25
     avoid_forward_speed: 0.16
     recover_turn_speed: 0.55
+    lidar_target_bias: 0.9
+    lidar_cluster_jump_distance: 0.22
+    lidar_cluster_min_beams: 2
+    lidar_cluster_max_beams: 18
+    lidar_cluster_max_width: 0.55
+    lidar_cluster_max_range: 3.0
+    lidar_front_fov_deg: 140.0
 
 marker_publisher:
   ros__parameters:

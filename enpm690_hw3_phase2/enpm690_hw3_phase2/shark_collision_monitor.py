@@ -11,13 +11,6 @@ class SharkCollisionMonitor:
         self.shark_radius = shark_radius
 
     def check_collision(self, shark: SharkState) -> bool:
-        if (
-            shark.x <= self.bounds.x_min + self.shark_radius
-            or shark.x >= self.bounds.x_max - self.shark_radius
-            or shark.y <= self.bounds.y_min + self.shark_radius
-            or shark.y >= self.bounds.y_max - self.shark_radius
-        ):
-            return True
         return any(circle_intersects_rect(shark.x, shark.y, self.shark_radius, obstacle) for obstacle in self.obstacles)
 
     def clamp_position(self, shark: SharkState) -> None:
