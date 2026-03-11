@@ -1,0 +1,128 @@
+<?xml version="1.0"?>
+<sdf version="1.10">
+  <world name="phase2_ocean_arena">
+    <gravity>0 0 -9.8</gravity>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+
+    <scene>
+      <ambient>0.35 0.45 0.60 1.0</ambient>
+      <background>0.05 0.10 0.18 1.0</background>
+    </scene>
+
+    <light name="sun" type="directional">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 12 0 0 0</pose>
+      <diffuse>0.8 0.85 0.9 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.5 0.25 -1</direction>
+    </light>
+
+    <model name="floor">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box><size>10 10 0.1</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>10 10 0.1</size></box>
+          </geometry>
+          <material>
+            <ambient>0.10 0.22 0.32 1</ambient>
+            <diffuse>0.10 0.22 0.32 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <pose>0 0 -0.05 0 0 0</pose>
+    </model>
+
+    <model name="north_wall">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>10 0.2 0.8</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>10 0.2 0.8</size></box></geometry><material><ambient>0.15 0.30 0.42 1</ambient><diffuse>0.15 0.30 0.42 1</diffuse></material></visual>
+      </link>
+      <pose>0 4.9 0.4 0 0 0</pose>
+    </model>
+    <model name="south_wall">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>10 0.2 0.8</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>10 0.2 0.8</size></box></geometry><material><ambient>0.15 0.30 0.42 1</ambient><diffuse>0.15 0.30 0.42 1</diffuse></material></visual>
+      </link>
+      <pose>0 -4.9 0.4 0 0 0</pose>
+    </model>
+    <model name="east_wall">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.2 10 0.8</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.2 10 0.8</size></box></geometry><material><ambient>0.15 0.30 0.42 1</ambient><diffuse>0.15 0.30 0.42 1</diffuse></material></visual>
+      </link>
+      <pose>4.9 0 0.4 0 0 0</pose>
+    </model>
+    <model name="west_wall">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.2 10 0.8</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.2 10 0.8</size></box></geometry><material><ambient>0.15 0.30 0.42 1</ambient><diffuse>0.15 0.30 0.42 1</diffuse></material></visual>
+      </link>
+      <pose>-4.9 0 0.4 0 0 0</pose>
+    </model>
+
+    <model name="center_reef">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>1.0 1.0 1.0</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>1.0 1.0 1.0</size></box></geometry><material><ambient>0.55 0.35 0.20 1</ambient><diffuse>0.55 0.35 0.20 1</diffuse></material></visual>
+      </link>
+      <pose>1.2 0.0 0.5 0 0 0</pose>
+    </model>
+    <model name="north_reef">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>1.2 0.8 1.0</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>1.2 0.8 1.0</size></box></geometry><material><ambient>0.42 0.28 0.18 1</ambient><diffuse>0.42 0.28 0.18 1</diffuse></material></visual>
+      </link>
+      <pose>0.0 2.1 0.5 0 0 0</pose>
+    </model>
+    <model name="south_reef">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>1.2 0.8 1.0</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>1.2 0.8 1.0</size></box></geometry><material><ambient>0.42 0.28 0.18 1</ambient><diffuse>0.42 0.28 0.18 1</diffuse></material></visual>
+      </link>
+      <pose>-0.6 -2.1 0.5 0 0 0</pose>
+    </model>
+    <model name="east_column">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.8 1.4 1.0</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.8 1.4 1.0</size></box></geometry><material><ambient>0.48 0.32 0.22 1</ambient><diffuse>0.48 0.32 0.22 1</diffuse></material></visual>
+      </link>
+      <pose>2.8 1.8 0.5 0 0 0</pose>
+    </model>
+    <model name="west_column">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.9 1.6 1.0</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.9 1.6 1.0</size></box></geometry><material><ambient>0.48 0.32 0.22 1</ambient><diffuse>0.48 0.32 0.22 1</diffuse></material></visual>
+      </link>
+      <pose>-2.6 1.0 0.5 0 0 0</pose>
+    </model>
+    <model name="lower_east_block">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>1.0 1.0 1.0</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>1.0 1.0 1.0</size></box></geometry><material><ambient>0.55 0.35 0.20 1</ambient><diffuse>0.55 0.35 0.20 1</diffuse></material></visual>
+      </link>
+      <pose>2.5 -1.8 0.5 0 0 0</pose>
+    </model>
+  </world>
+</sdf>

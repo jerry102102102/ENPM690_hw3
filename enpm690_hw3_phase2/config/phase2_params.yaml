@@ -1,0 +1,25 @@
+game_manager:
+  ros__parameters:
+    mode: teleop_play
+    cmd_input_topic: /cmd_vel_input
+    cmd_output_topic: /cmd_vel
+    episode_duration: 30.0
+    game_dt: 0.1
+    score_topic: /phase2/score
+    time_topic: /phase2/time_remaining
+    mode_topic: /phase2/mode
+    catch_event_topic: /phase2/catch_event
+    fish_state_topic: /phase2/fish_state_json
+    game_state_topic: /phase2/game_state_json
+    auto_reset: true
+
+shark_auto_controller:
+  ros__parameters:
+    cmd_topic: /cmd_vel_input
+    k_target: 1.6
+    k_avoid: 1.4
+    control_hz: 10.0
+
+marker_publisher:
+  ros__parameters:
+    marker_topic: /phase2/markers
