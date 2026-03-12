@@ -1,46 +1,29 @@
-# ENPM690 HW3 Submission Package
+# ENPM690 HW3 Submission
 
-This submission uses a deterministic lightweight simulation pipeline (no Gazebo required) to generate the required HW3 demo artifacts.
+This folder is the complete hand-in package.
 
-## Contents
+## Included Files
 
-- `demo_video.mp4`: Required demonstration video.
-- `teleop_input_log.txt`: Real-time teleop input log used in Segment 1.
-- `demo_metrics.md`: Summary metrics from the generated runs.
-- `run_demo.sh`: Submission-local one-command artifact generator.
-- `report.md`: Short technical report.
-
-## What the Demo Video Shows
-
-1. **Teleop with real-time input logging + visual feedback**
-- Scripted keyboard-like commands (`W`, `A`, `D`, `SPACE`) are applied.
-- Input events are logged live on-screen and also exported to `teleop_input_log.txt`.
-- The robot trajectory, simulated LiDAR beams, and environment feedback are visualized.
-
-2. **Autonomous behavior with sensor display**
-- A deterministic LiDAR-segmentation controller runs autonomously to clear pellets.
-- LiDAR bins are shown in real time with a marked safety-distance threshold.
-- Overlay shows current target plus collected/remaining counts.
-- Autonomous segment playback is accelerated by `4x` (shorter demo while preserving full collection behavior).
-
-3. **Tunable parameter impact comparison**
-- Five autonomous parameter groups are evaluated in `demo_metrics.md`.
-- The key exposed tuning terms are speed (`max_linear`) and steering sensitivity (`heading_gain`).
-- Comparison metrics include completion flag, score, collisions, close-calls, and completion time.
+- `demo_video.mp4` - required demonstration video
+- `report.md` - short technical report
+- `run_demo.sh` - one-command artifact regeneration
+- `teleop_input_log.txt` - teleop command log
+- `demo_metrics.md` - autonomous experiment summary
+- `code/` - self-contained source bundle (`phase2` package + artifact scripts)
 
 ## Regenerate Artifacts
 
-From repo root:
-
-```bash
-./scripts/regenerate_submission.sh
-```
-
-Equivalent (from `submission/`):
+Run from this folder:
 
 ```bash
 ./run_demo.sh
 ```
+
+Generated files:
+
+- `demo_video.mp4`
+- `teleop_input_log.txt`
+- `demo_metrics.md`
 
 ## Runtime Requirements
 
@@ -48,18 +31,15 @@ Equivalent (from `submission/`):
 - `matplotlib`
 - `ffmpeg`
 
-Install on Ubuntu if needed:
+Ubuntu install:
 
 ```bash
 sudo apt update
 sudo apt install -y python3-matplotlib ffmpeg
 ```
 
-## Run Existing ROS Packages (Optional)
+## Code Layout
 
-The repository still contains ROS 2 Phase 1/2 packages under:
-
-- `enpm690_hw3_phase1/`
-- `enpm690_hw3_phase2/`
-
-For this submission package, the required deliverables are generated through the lightweight simulator pipeline above for faster and more deterministic reproduction.
+- `code/enpm690_hw3_phase2/` - phase2 package and launch/config/model files
+- `code/scripts/generate_submission_artifacts.py` - deterministic demo generator
+- `code/scripts/regenerate_submission.sh` - helper script used by `run_demo.sh`

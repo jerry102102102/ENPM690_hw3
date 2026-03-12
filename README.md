@@ -1,35 +1,26 @@
-# ENPM690 HW3 Submission Package
+# ENPM690 Homework 3
 
-This repository is intentionally reduced for direct submission.
+This repository contains the final submission package for HW3.
 
-## Submission Folder
+## Hand-In Folder
 
-Use only `hw3_ready/`, which contains:
+Use `hw3_ready/submission/` for grading. It includes:
 
-- `enpm690_hw3_phase2/`
-- `scripts/regenerate_submission.sh`
-- `scripts/generate_submission_artifacts.py`
-- `submission/` (generated artifacts)
+- `README.md`
+- `report.md`
+- `demo_video.mp4`
+- `run_demo.sh`
+- `code/` (self-contained source and regeneration scripts)
 
-## Regenerate Artifacts
-
-```bash
-cd hw3_ready
-./scripts/regenerate_submission.sh
-```
-
-Artifacts are regenerated in:
-
-- `hw3_ready/submission/demo_video.mp4`
-- `hw3_ready/submission/teleop_input_log.txt`
-- `hw3_ready/submission/demo_metrics.md`
-
-## Optional ROS Run (Phase 2)
+## Regenerate Submission Artifacts
 
 ```bash
-source /opt/ros/jazzy/setup.bash
-cd hw3_ready
-colcon build --packages-select enpm690_hw3_phase2
-source install/setup.bash
-ros2 launch enpm690_hw3_phase2 phase2_play_auto.launch.py
+cd hw3_ready/submission
+./run_demo.sh
 ```
+
+This regenerates:
+
+- `demo_video.mp4`
+- `teleop_input_log.txt`
+- `demo_metrics.md`
