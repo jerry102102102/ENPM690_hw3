@@ -34,6 +34,7 @@ setup(
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
+            "pacman_matplotlib_sim = enpm690_hw3_phase2.matplotlib_pacman_sim:main",
             "pacman_game_manager = enpm690_hw3_phase2.pacman_game_manager:main",
             "marker_publisher = enpm690_hw3_phase2.marker_publisher:main",
             "pacman_auto_controller = enpm690_hw3_phase2.pacman_auto_controller:main",
