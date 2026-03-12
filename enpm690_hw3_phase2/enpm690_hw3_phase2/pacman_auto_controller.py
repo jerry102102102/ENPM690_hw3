@@ -153,7 +153,7 @@ class PacmanAutoController(Node):
 
     def _slice_max(self, lidar: list[float], start: int, end: int) -> float:
         values = lidar[max(0, start) : min(len(lidar), end)]
-        if not values:
+        if len(values) == 0:
             return 0.0
         return float(max(values))
 
