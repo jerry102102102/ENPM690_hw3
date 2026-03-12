@@ -1,61 +1,22 @@
-# ENPM690 Homework 3 Phase 2
+# ENPM690 Homework 3 Phase 2 (Submission Subset)
 
-Phase 2 provides a Pac-Man-style game flow on top of the Phase 1 ROS 2 + Gazebo stack, plus a deterministic `matplotlib` demo path used by submission artifact generation.
+This package is intentionally pruned for submission artifact regeneration only.
 
-## Main idea
+## Scope
 
-- Pac-Man = robot
-- pellets = fixed points
-- ghost = one simple waypoint patrol agent
-- visualization = `matplotlib`
-- teleop and auto both run inside the same 2D simulator
+- Keeps only the utility modules imported by `code/scripts/generate_submission_artifacts.py`
+- Removes ROS/Gazebo launch, world, model, RViz, and runtime node code
+- Supports deterministic video, teleop log, and metrics generation in `hw3_ready/submission/`
 
-## Requirements
+## Kept Python Modules
 
-Install matplotlib if needed:
+- `enpm690_hw3_phase2/constants.py`
+- `enpm690_hw3_phase2/geometry_utils.py`
 
-```bash
-sudo apt install python3-matplotlib
-```
+## Regeneration Entry Point
 
-## Run teleop
+Run from `hw3_ready/submission/`:
 
 ```bash
-source /opt/ros/jazzy/setup.bash
-source install/setup.bash
-ros2 run enpm690_hw3_phase2 pacman_matplotlib_sim -- --mode teleop
+./run_demo.sh
 ```
-
-Controls:
-
-- `W` / `Up`: forward
-- `S` / `Down`: backward
-- `A` / `Left`: turn left
-- `D` / `Right`: turn right
-- `R`: reset
-
-## Run autonomous baseline
-
-```bash
-source /opt/ros/jazzy/setup.bash
-source install/setup.bash
-ros2 run enpm690_hw3_phase2 pacman_matplotlib_sim -- --mode auto
-```
-
-The auto mode uses:
-
-- deterministic LiDAR segmentation into obstacle risk + candidate pursuit direction
-- deterministic next-target heading selection over active pellets
-- obstacle-aware pursuit with ghost avoidance
-
-## Rules
-
-- each pellet gives `+1`
-- touching the ghost ends the run
-- collecting all pellets is a victory
-- time limit is `30s`
-
-## Notes
-
-- Phase 1 remains unchanged and still uses the real ROS 2 + Gazebo stack
-- `scripts/regenerate_submission.sh` generates the required HW3 submission artifacts without launching Gazebo

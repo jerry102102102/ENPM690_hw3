@@ -43,3 +43,7 @@ From `hw3_ready/submission/`:
 ```
 
 This regenerates `demo_video.mp4`, `teleop_input_log.txt`, and `demo_metrics.md` using code in `code/`.
+
+## Submission Stack
+
+The submitted code path is intentionally matplotlib-only for artifact generation and excludes ROS/Gazebo launch assets and runtime nodes.

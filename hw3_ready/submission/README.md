@@ -40,6 +40,6 @@ sudo apt install -y python3-matplotlib ffmpeg
 
 ## Code Layout
 
-- `code/enpm690_hw3_phase2/` - phase2 package and launch/config/model files
+- `code/enpm690_hw3_phase2/` - pruned utility package used by the generator (`constants.py`, `geometry_utils.py`)
 - `code/scripts/generate_submission_artifacts.py` - deterministic demo generator
 - `code/scripts/regenerate_submission.sh` - helper script used by `run_demo.sh`
