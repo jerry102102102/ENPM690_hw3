@@ -21,12 +21,12 @@ This submission uses a deterministic lightweight simulation pipeline (no Gazebo 
 - A deterministic LiDAR-segmentation controller runs autonomously to clear pellets.
 - LiDAR bins are shown in real time with a marked safety-distance threshold.
 - Overlay shows current target plus collected/remaining counts.
+- Autonomous segment playback is accelerated by `4x` (shorter demo while preserving full collection behavior).
 
 3. **Tunable parameter impact comparison**
-- Two autonomous tunings run side-by-side:
-  - Cautious: larger safety margin, lower max speed.
-  - Aggressive: smaller safety margin, higher max speed.
-- Visual and metric differences are shown in the same scene.
+- Five autonomous parameter groups are evaluated in `demo_metrics.md`.
+- The key exposed tuning terms are speed (`max_linear`) and steering sensitivity (`heading_gain`).
+- Comparison metrics include completion flag, score, collisions, close-calls, and completion time.
 
 ## Regenerate Artifacts
 

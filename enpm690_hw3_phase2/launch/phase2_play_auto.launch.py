@@ -36,6 +36,7 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("forward_speed", default_value="0.28"),
             DeclareLaunchArgument("turn_gain", default_value="1.7"),
             DeclareLaunchArgument("ghost_avoid_gain", default_value="1.6"),
+            DeclareLaunchArgument("target_signal_gain", default_value="0.9"),
             SetEnvironmentVariable(
                 "GZ_SIM_RESOURCE_PATH",
                 [
@@ -84,6 +85,7 @@ def generate_launch_description() -> LaunchDescription:
                                 "forward_speed": LaunchConfiguration("forward_speed"),
                                 "turn_gain": LaunchConfiguration("turn_gain"),
                                 "ghost_avoid_gain": LaunchConfiguration("ghost_avoid_gain"),
+                                "target_signal_gain": LaunchConfiguration("target_signal_gain"),
                             },
                         ],
                     ),

@@ -49,6 +49,13 @@ class PacmanAutoController(Node):
         self.wall_slow_distance = float(self.get_parameter("wall_slow_distance").value)
         self.target_signal_gain = float(self.get_parameter("target_signal_gain").value)
         control_hz = float(self.get_parameter("control_hz").value)
+        self.get_logger().info(
+            "autonomous params: "
+            f"forward_speed={self.forward_speed:.2f}, "
+            f"turn_gain={self.turn_gain:.2f}, "
+            f"target_signal_gain={self.target_signal_gain:.2f}, "
+            f"ghost_avoid_gain={self.ghost_avoid_gain:.2f}"
+        )
 
         self.robot_x = 0.0
         self.robot_y = 0.0

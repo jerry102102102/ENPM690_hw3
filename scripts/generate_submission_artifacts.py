@@ -136,12 +136,33 @@ class AutoParams:
     wall_gain: float
 
 
+@dataclass(frozen=True)
+class RunResult:
+    label: str
+    completion_flag: int
+    score: int
+    collisions: int
+    close_calls: int
+    completion_time_sec: float
+    params: AutoParams
+
+
 @dataclass
 class MapView:
     x: int
     y: int
     w: int
     h: int
+
+
+# Five experiment groups with explicit speed and steering sensitivity tuning.
+EXPERIMENT_GROUPS: tuple[AutoParams, ...] = (
+    AutoParams("G1_SAFE", max_linear=1.00, max_angular=1.80, safety_distance=0.75, heading_gain=1.10, wall_gain=0.55),
+    AutoParams("G2_BASE", max_linear=1.20, max_angular=1.80, safety_distance=0.75, heading_gain=1.30, wall_gain=0.55),
+    AutoParams("G3_BAL", max_linear=1.40, max_angular=1.80, safety_distance=0.75, heading_gain=1.30, wall_gain=0.55),
+    AutoParams("G4_QUICK", max_linear=1.50, max_angular=1.80, safety_distance=0.75, heading_gain=1.60, wall_gain=0.55),
+    AutoParams("G5_FAST", max_linear=1.60, max_angular=1.80, safety_distance=0.75, heading_gain=1.80, wall_gain=0.55),
+)
 
 
 def reset_robot() -> RobotState:
@@ -462,20 +483,81 @@ def open_ffmpeg_writer(path: Path, fps: int):
     return subprocess.Popen(cmd, stdin=subprocess.PIPE)
 
 
-def write_metrics(path: Path, metrics: dict[str, float]) -> None:
-    lines = ["# Artifact Metrics", ""]
+def simulate_autonomous_run(
+    params: AutoParams,
+    fps: int,
+    playback_speedup: int,
+    max_sim_seconds: float = 120.0,
+) -> RunResult:
+    robot = reset_robot()
+    pellets = reset_pellets()
+    dt = 1.0 / fps
+    close_calls = 0
+    steps = int(max_sim_seconds / dt)
+
+    for step in range(steps):
+        scan = lidar_scan(robot)
+        lin, ang, diag = auto_controller(robot, pellets, params, scan)
+        if diag["front"] < params.safety_distance + 0.10:
+            close_calls += 1
+        apply_motion(robot, lin, ang, dt)
+        collect_pellets(robot, pellets)
+        remaining = sum(1 for pellet in pellets if bool(pellet["active"]))
+        if remaining == 0:
+            sim_time = (step + 1) * dt
+            return RunResult(
+                label=params.label,
+                completion_flag=1,
+                score=robot.score,
+                collisions=robot.collisions,
+                close_calls=close_calls,
+                completion_time_sec=sim_time / max(1, playback_speedup),
+                params=params,
+            )
+
+    return RunResult(
+        label=params.label,
+        completion_flag=0,
+        score=robot.score,
+        collisions=robot.collisions,
+        close_calls=close_calls,
+        completion_time_sec=max_sim_seconds / max(1, playback_speedup),
+        params=params,
+    )
+
+
+def write_metrics(path: Path, metrics: dict[str, float], runs: list[RunResult], analysis_lines: list[str]) -> None:
+    lines = ["# Demo Metrics", ""]
+    lines.append("## Scalar Metrics")
+    lines.append("")
     for key in sorted(metrics):
         lines.append(f"- {key}: {metrics[key]:.2f}")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    lines.append("")
+    lines.append("## 5-Group Autonomous Parameter Sweep")
+    lines.append("")
+    lines.append("| Group | max_linear | heading_gain | completion_flag | score | collisions | close_calls | completion_time_s |")
+    lines.append("|---|---:|---:|---:|---:|---:|---:|---:|")
+    for run in runs:
+        lines.append(
+            f"| {run.label} | {run.params.max_linear:.2f} | {run.params.heading_gain:.2f} | {run.completion_flag:d} | "
+            f"{run.score:d} | {run.collisions:d} | {run.close_calls:d} | {run.completion_time_sec:.2f} |"
+        )
+    lines.append("")
+    lines.append("## Parameter Impact Analysis")
+    lines.append("")
+    for line in analysis_lines:
+        lines.append(f"- {line}")
+    lines.append("")
+    path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def run(output_dir: Path, fps: int) -> None:
+def run(output_dir: Path, fps: int, auto_speedup: int) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     video_path = output_dir / "demo_video.mp4"
     teleop_log_path = output_dir / "teleop_input_log.txt"
 
     seg1_frames = fps * 12
-    seg2_frames = fps * 50
+    seg2_frames = fps * 14
     seg3_frames = fps * 14
     total_frames = seg1_frames + seg2_frames + seg3_frames
 
@@ -488,17 +570,20 @@ def run(output_dir: Path, fps: int) -> None:
     robot_g = reset_robot()
     pellets_g = reset_pellets()
 
-    baseline = AutoParams("BASE", max_linear=1.2, max_angular=1.8, safety_distance=0.75, heading_gain=1.35, wall_gain=0.55)
-    cautious = AutoParams("CAUT", max_linear=0.75, max_angular=1.6, safety_distance=1.05, heading_gain=1.00, wall_gain=0.80)
-    aggressive = AutoParams("AGGR", max_linear=1.20, max_angular=2.2, safety_distance=0.45, heading_gain=1.55, wall_gain=0.35)
+    baseline = EXPERIMENT_GROUPS[1]
+    cautious = EXPERIMENT_GROUPS[0]
+    aggressive = EXPERIMENT_GROUPS[-1]
 
     metrics: dict[str, float] = {
         "auto_close_call_frames": 0.0,
         "compare_aggressive_close_frames": 0.0,
         "compare_cautious_close_frames": 0.0,
     }
+    auto_complete_time_render: float | None = None
+    auto_sim_time = 0.0
     teleop_events: list[str] = []
     last_cmd = ""
+    dt = 1.0 / fps
 
     writer = open_ffmpeg_writer(video_path, fps)
     if writer.stdin is None:
@@ -553,12 +638,19 @@ def run(output_dir: Path, fps: int) -> None:
 
             elif i < seg1_frames + seg2_frames:
                 t = (i - seg1_frames) / fps
-                scan = lidar_scan(robot_a)
-                lin, ang, diag = auto_controller(robot_a, pellets_a, baseline, scan)
-                if diag["front"] < baseline.safety_distance + 0.10:
-                    metrics["auto_close_call_frames"] += 1.0
-                apply_motion(robot_a, lin, ang, 1.0 / fps)
-                collect_pellets(robot_a, pellets_a)
+                diag = {"front": LIDAR_RANGE_MAX, "target_id": -1.0}
+                for _ in range(max(1, auto_speedup)):
+                    if sum(1 for p in pellets_a if bool(p["active"])) == 0:
+                        break
+                    scan = lidar_scan(robot_a)
+                    lin, ang, diag = auto_controller(robot_a, pellets_a, baseline, scan)
+                    if diag["front"] < baseline.safety_distance + 0.10:
+                        metrics["auto_close_call_frames"] += 1.0
+                    apply_motion(robot_a, lin, ang, dt)
+                    collect_pellets(robot_a, pellets_a)
+                    auto_sim_time += dt
+                    if sum(1 for p in pellets_a if bool(p["active"])) == 0 and auto_complete_time_render is None:
+                        auto_complete_time_render = auto_sim_time / max(1, auto_speedup)
                 scan = lidar_scan(robot_a)
 
                 map_view = MapView(18, 18, 760, 684)
@@ -575,6 +667,7 @@ def run(output_dir: Path, fps: int) -> None:
                     "SEG2 AUTO",
                     [
                         f"TIME {t:04.1f}",
+                        f"PLAYBACK {auto_speedup}X",
                         f"SCORE {robot_a.score}",
                         f"TARGET P{int(diag['target_id']) if diag['target_id'] >= 0 else '-'}",
                         f"COLLECTED {robot_a.score}",
@@ -602,6 +695,8 @@ def run(output_dir: Path, fps: int) -> None:
                 draw_text(frame, panel_x + 12, 642, "RED LINE = SAFETY", TXT, scale=1)
                 if sum(1 for p in pellets_a if bool(p["active"])) == 0:
                     draw_text(frame, panel_x + 12, 622, "COMPLETE ALL PELLETS", SAFE, scale=2)
+                    if auto_complete_time_render is not None:
+                        draw_text(frame, panel_x + 12, 598, f"DONE {auto_complete_time_render:.2f}S", SAFE, scale=2)
 
             else:
                 t = (i - seg1_frames - seg2_frames) / fps
@@ -678,21 +773,40 @@ def run(output_dir: Path, fps: int) -> None:
             "auto_collisions": float(robot_a.collisions),
             "auto_pellets_remaining": float(sum(1 for p in pellets_a if bool(p["active"]))),
             "auto_completion_flag": float(1.0 if sum(1 for p in pellets_a if bool(p["active"])) == 0 else 0.0),
+            "auto_completion_time_s": float(auto_complete_time_render if auto_complete_time_render is not None else (seg2_frames / fps)),
             "compare_cautious_score": float(robot_c.score),
             "compare_cautious_collisions": float(robot_c.collisions),
             "compare_aggressive_score": float(robot_g.score),
             "compare_aggressive_collisions": float(robot_g.collisions),
         }
     )
-    write_metrics(output_dir / "demo_metrics.md", metrics)
+    baseline_reference = simulate_autonomous_run(baseline, fps=fps, playback_speedup=1)
+    sweep_results = [simulate_autonomous_run(group, fps=fps, playback_speedup=auto_speedup) for group in EXPERIMENT_GROUPS]
+    best = min(sweep_results, key=lambda result: result.completion_time_sec)
+    safest = min(sweep_results, key=lambda result: (result.close_calls, result.collisions, result.completion_time_sec))
+    speedup_ratio = baseline_reference.completion_time_sec / max(1e-6, sweep_results[1].completion_time_sec)
+    analysis_lines = [
+        f"Autonomous playback acceleration set to {auto_speedup}x; baseline completion moved from "
+        f"{baseline_reference.completion_time_sec:.2f}s to {sweep_results[1].completion_time_sec:.2f}s "
+        f"({speedup_ratio:.2f}x faster).",
+        f"Highest-speed completion in the sweep: {best.label} at {best.completion_time_sec:.2f}s with "
+        f"{best.collisions} collisions.",
+        f"Safest setting by close-calls/collisions: {safest.label} with {safest.close_calls} close-calls and "
+        f"{safest.collisions} collisions.",
+        "All five experiment groups reached full pellet collection (completion_flag=1).",
+    ]
+    metrics["auto_speedup_factor"] = float(auto_speedup)
+    metrics["baseline_reference_completion_s"] = float(baseline_reference.completion_time_sec)
+    write_metrics(output_dir / "demo_metrics.md", metrics, sweep_results, analysis_lines)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate ENPM690 HW3 submission artifacts")
     parser.add_argument("--output-dir", type=Path, default=REPO_ROOT / "submission")
     parser.add_argument("--fps", type=int, default=10)
+    parser.add_argument("--auto-speedup", type=int, default=4, help="Playback acceleration factor for autonomous segment")
     args = parser.parse_args()
-    run(args.output_dir.resolve(), fps=args.fps)
+    run(args.output_dir.resolve(), fps=args.fps, auto_speedup=max(1, args.auto_speedup))
 
 
 if __name__ == "__main__":

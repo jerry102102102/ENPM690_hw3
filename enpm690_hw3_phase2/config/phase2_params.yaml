@@ -22,6 +22,7 @@ pacman_auto_controller:
     wall_avoid_gain: 1.2
     wall_stop_distance: 0.28
     wall_slow_distance: 0.85
+    target_signal_gain: 0.9
 
 marker_publisher:
   ros__parameters:
