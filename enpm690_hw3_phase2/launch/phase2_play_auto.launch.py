@@ -20,7 +20,7 @@ def generate_launch_description() -> LaunchDescription:
         launch_arguments={
             "world": LaunchConfiguration("world"),
             "rviz_config": rviz_config,
-            "robot_name": "tb3_phase2_auto",
+            "robot_name": "tb3_phase2",
             "x": "0.0",
             "y": "0.0",
             "z": "0.08",

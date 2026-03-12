@@ -17,7 +17,7 @@ def generate_launch_description() -> LaunchDescription:
         launch_arguments={
             "world": str(phase1_share / "worlds" / "phase1_obstacles.sdf"),
             "rviz_config": str(phase2_share / "rviz" / "phase2_pacman.rviz"),
-            "robot_name": "tb3_phase2_train",
+            "robot_name": "tb3_phase2",
             "x": "0.0",
             "y": "0.0",
             "z": "0.08",
