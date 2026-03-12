@@ -2,7 +2,7 @@
 <package format="3">
   <name>enpm690_hw3_phase2</name>
   <version>0.1.0</version>
-  <description>Phase 2 shark hunt game, autonomous baseline, and RL environment for ENPM690 Homework 3.</description>
+  <description>Phase 2 Pac-Man-style game with teleop and autonomous play for ENPM690 Homework 3.</description>
   <maintainer email="student@example.com">ENPM690 Student</maintainer>
   <license>Apache-2.0</license>
 

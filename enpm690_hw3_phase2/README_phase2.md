@@ -1,7 +1,6 @@
 # ENPM690 Homework 3 Phase 2
 
-Phase 2 now uses a pure `matplotlib` 2D simulator as the main path.
-Gazebo is no longer the recommended Phase 2 workflow.
+Phase 2 provides a Pac-Man-style game flow on top of the Phase 1 ROS 2 + Gazebo stack, plus a deterministic `matplotlib` demo path used by submission artifact generation.
 
 ## Main idea
 
@@ -59,4 +58,4 @@ The auto mode uses:
 ## Notes
 
 - Phase 1 remains unchanged and still uses the real ROS 2 + Gazebo stack
-- old Gazebo-heavy Phase 2 files remain only as legacy reference
+- `scripts/regenerate_submission.sh` generates the required HW3 submission artifacts without launching Gazebo

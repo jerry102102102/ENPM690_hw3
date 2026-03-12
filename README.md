@@ -1,164 +1,56 @@
 # ENPM690 Homework 3
 
-This repository contains the Phase 1 simulation stack for ENPM690 Homework 3.
+Current HW3 repository focused on:
 
-The implementation targets:
+- Phase 1 ROS 2 + Gazebo stack (`enpm690_hw3_phase1`)
+- Phase 2 Pac-Man-style play/auto stack (`enpm690_hw3_phase2`)
+- Submission artifact regeneration pipeline (`scripts/`, `submission/`)
 
-- ROS 2 Jazzy
-- Gazebo Harmonic
-- `ros_gz_sim` and `ros_gz_bridge`
-- RViz2
-- Python ROS 2 nodes with `rclpy`
+## Regenerate submission artifacts
 
-## Workspace layout
-
-The ROS 2 package lives at:
-
-- `enpm690_hw3_phase1/`
-
-Key package assets:
-
-- `launch/`: Gazebo, robot spawn, bridge, RViz, and top-level bringup launch files
-- `worlds/`: deterministic obstacle world for LiDAR validation
-- `models/`: TurtleBot3-style differential drive robot model used by Gazebo
-- `urdf/`: RViz and TF-friendly robot description
-- `config/`: structured `ros_gz_bridge` YAML mapping
-- `rviz/`: ready-to-use RViz display profile
-- `enpm690_hw3_phase1/`: Python nodes for keyboard teleop, teleop logging, and odom-to-TF
-
-## Phase 1 features
-
-- Gazebo Harmonic launches with a custom obstacle world.
-- A TurtleBot3-like differential-drive robot is spawned at a known pose.
-- ROS-to-Gazebo command velocity bridging is handled from YAML.
-- LiDAR, odometry, and clock are bridged back into ROS 2.
-- `robot_state_publisher` provides the robot model and static TF.
-- A Python TF broadcaster converts `/odom` into the `odom -> base_footprint` transform for RViz.
-- A Python teleop logger prints readable command semantics in real time.
-- A Python keyboard teleop node publishes `/cmd_vel` without relying on Gazebo Classic tooling.
-- RViz2 is preconfigured for the robot model, TF tree, LaserScan, and odometry.
-
-## Runtime dependencies
-
-Install the Phase 1 runtime dependencies on a Linux machine with ROS 2 Jazzy:
+From repo root:
 
 ```bash
-sudo apt update
-sudo apt install \
-  ros-jazzy-ros-gz-sim \
-  ros-jazzy-ros-gz-bridge \
-  ros-jazzy-robot-state-publisher \
-  ros-jazzy-rviz2
+./scripts/regenerate_submission.sh
 ```
 
-If your Jazzy installation does not already include the standard message packages and TF tools, install the desktop metapackage:
+Generated outputs:
 
-```bash
-sudo apt install ros-jazzy-desktop
-```
+- `submission/demo_video.mp4`
+- `submission/teleop_input_log.txt`
+- `submission/demo_metrics.md`
 
-## Build
-
-From the workspace root:
+## Build ROS packages (optional)
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-colcon build --packages-select enpm690_hw3_phase1
+colcon build --packages-select enpm690_hw3_phase1 enpm690_hw3_phase2
 source install/setup.bash
 ```
 
-## Phase 1 run procedure
-
-Terminal 1:
+## Run Phase 1
 
 ```bash
-source /opt/ros/jazzy/setup.bash
-source install/setup.bash
 ros2 launch enpm690_hw3_phase1 phase1_bringup.launch.py
-```
-
-Terminal 2:
-
-```bash
-source /opt/ros/jazzy/setup.bash
-source install/setup.bash
 ros2 run enpm690_hw3_phase1 keyboard_teleop
 ```
 
-Notes:
+## Run Phase 2
 
-- The main launch starts Gazebo Harmonic, the robot spawn flow, the bridge, `robot_state_publisher`, the odom-to-TF helper, the teleop logger, and RViz2.
-- The keyboard teleop node is run separately so it can own terminal stdin reliably.
-- A convenience launch wrapper also exists at `ros2 launch enpm690_hw3_phase1 teleop_keyboard.launch.py`, but direct `ros2 run` is the safer choice for keyboard capture during demos.
-- The robot spawn pose defaults to `x=0.0`, `y=0.0`, `z=0.08`, `yaw=0.0`.
-
-## Phase 1 topic interface
-
-Primary ROS-side topics:
-
-- `/cmd_vel`
-- `/scan`
-- `/odom`
-- `/tf`
-- `/tf_static`
-- `/clock`
-
-## Phase 1 validation checklist
-
-After bringup:
-
-```bash
-ros2 topic list
-ros2 topic echo /scan
-ros2 topic echo /odom
-ros2 topic echo /cmd_vel
-ros2 run tf2_tools view_frames
-```
-
-Manual validation steps:
-
-1. Confirm the robot appears in Gazebo and RViz2.
-2. Drive forward toward the obstacle directly in front of the spawn pose.
-3. Turn left and right and watch the scan arc reshape in RViz2.
-4. Confirm `/scan` and `/odom` update continuously.
-5. Confirm the teleop logger prints readable events such as `forward`, `turn left`, and `stop`.
-
-## World description
-
-The obstacle world is intentionally simple and deterministic:
-
-- bounded rectangular arena
-- large open start area near the origin
-- obstacle directly ahead of the spawn pose
-- obstacle cluster on the left
-- obstacle cluster on the right
-- a few farther obstacles to make scan geometry obvious while driving
-
-This is a debugging world for teleop and LiDAR verification, not a final autonomy benchmark map.
-
-## Phase 2 summary
-
-Phase 2 is now a minimal Pac-Man-style game built on top of the working Phase 1 stack.
-
-Main commands:
+Teleop mode:
 
 ```bash
 ros2 launch enpm690_hw3_phase2 phase2_play_teleop.launch.py
-ros2 launch enpm690_hw3_phase2 phase2_play_auto.launch.py
-```
-
-Teleop remains the same Phase 1 keyboard flow:
-
-```bash
 ros2 run enpm690_hw3_phase1 keyboard_teleop
 ```
 
-Phase 2 adds:
+Autonomous mode:
 
-- fixed pellets
-- one simple waypoint ghost
-- score and timer topics
-- RViz marker visualization
-- one LiDAR-based rule controller for auto play
+```bash
+ros2 launch enpm690_hw3_phase2 phase2_play_auto.launch.py
+```
 
-See [enpm690_hw3_phase2/README_phase2.md](enpm690_hw3_phase2/README_phase2.md) for the full Phase 2 usage guide.
+## Submission docs
+
+- `submission/README.md`
+- `submission/report.md`
