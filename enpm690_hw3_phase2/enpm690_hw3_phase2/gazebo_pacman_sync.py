@@ -25,11 +25,13 @@ class GazeboPacmanSync(Node):
         self.declare_parameter("pellet_state_topic", "/phase2/pellet_state_json")
         self.declare_parameter("ghost_state_topic", "/phase2/ghost_state_json")
         self.declare_parameter("service_timeout", 10.0)
+        self.declare_parameter("spawn_missing_entities", False)
 
         share = Path(get_package_share_directory("enpm690_hw3_phase2"))
         self.pellet_model = share / "models" / "pellet_simple" / "model.sdf"
         self.ghost_model = share / "models" / "ghost_simple" / "model.sdf"
         self.service_timeout = float(self.get_parameter("service_timeout").value)
+        self.spawn_missing_entities = bool(self.get_parameter("spawn_missing_entities").value)
 
         self.spawn_client = self.create_client(SpawnEntity, "/gzserver/spawn_entity")
         self.delete_client = self.create_client(DeleteEntity, "/gzserver/delete_entity")
@@ -66,7 +68,7 @@ class GazeboPacmanSync(Node):
             if not pellet_id:
                 continue
             active = bool(pellet.get("active", False))
-            if active and pellet_id not in self.spawned_entities:
+            if active and pellet_id not in self.spawned_entities and self.spawn_missing_entities:
                 request = make_spawn_entity_request(
                     pellet_id,
                     self.pellet_model,
@@ -77,7 +79,7 @@ class GazeboPacmanSync(Node):
                 self._call(self.spawn_client, request)
                 self.spawned_entities.add(pellet_id)
                 self.get_logger().info(f"[GZ_SYNC] spawned pellet {pellet_id}")
-            elif not active and pellet_id in self.spawned_entities and pellet_id not in self.deleted_pellets:
+            elif not active and pellet_id not in self.deleted_pellets:
                 self._call(self.delete_client, make_delete_entity_request(pellet_id))
                 self.deleted_pellets.add(pellet_id)
                 self.spawned_entities.discard(pellet_id)
@@ -87,7 +89,7 @@ class GazeboPacmanSync(Node):
         ghost_id = str(ghost.get("ghost_id", ""))
         if not ghost_id:
             return
-        if not self.ghost_spawned:
+        if not self.ghost_spawned and self.spawn_missing_entities:
             request = make_spawn_entity_request(
                 ghost_id,
                 self.ghost_model,
@@ -101,6 +103,7 @@ class GazeboPacmanSync(Node):
             self.get_logger().info(f"[GZ_SYNC] spawned ghost {ghost_id}")
             return
 
+        self.ghost_spawned = True
         request = make_set_entity_state_request(
             ghost_id,
             float(ghost.get("x", 0.0)),
