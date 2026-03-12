@@ -19,6 +19,8 @@ setup(
         (str(share_dir / "config"), glob("config/*.yaml")),
         (str(share_dir / "worlds"), glob("worlds/*.sdf")),
         (str(share_dir / "rviz"), glob("rviz/*.rviz")),
+        (str(share_dir / "models" / "pellet_simple"), glob("models/pellet_simple/*")),
+        (str(share_dir / "models" / "ghost_simple"), glob("models/ghost_simple/*")),
         (str(share_dir / "models" / "tuna_simple"), glob("models/tuna_simple/*")),
         (str(share_dir / "models" / "sardine_simple"), glob("models/sardine_simple/*")),
         (str(share_dir / "models" / "seaweed_simple"), glob("models/seaweed_simple/*")),
@@ -35,6 +37,7 @@ setup(
             "pacman_game_manager = enpm690_hw3_phase2.pacman_game_manager:main",
             "marker_publisher = enpm690_hw3_phase2.marker_publisher:main",
             "pacman_auto_controller = enpm690_hw3_phase2.pacman_auto_controller:main",
+            "gazebo_pacman_sync = enpm690_hw3_phase2.gazebo_pacman_sync:main",
         ],
     },
 )

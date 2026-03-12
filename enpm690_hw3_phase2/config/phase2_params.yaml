@@ -15,6 +15,7 @@ pacman_auto_controller:
     cmd_topic: /cmd_vel
     control_hz: 10.0
     forward_speed: 0.28
+    min_forward_speed: 0.12
     turn_gain: 1.7
     ghost_avoid_gain: 1.6
     ghost_avoid_distance: 1.2

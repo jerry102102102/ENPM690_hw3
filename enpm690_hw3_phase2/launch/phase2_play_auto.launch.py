@@ -63,5 +63,11 @@ def generate_launch_description() -> LaunchDescription:
                 output="screen",
                 parameters=[params, {"use_sim_time": False}],
             ),
+            Node(
+                package="enpm690_hw3_phase2",
+                executable="gazebo_pacman_sync",
+                output="screen",
+                parameters=[{"use_sim_time": False}],
+            ),
         ]
     )

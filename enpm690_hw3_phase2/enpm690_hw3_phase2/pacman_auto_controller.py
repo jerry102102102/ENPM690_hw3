@@ -29,6 +29,7 @@ class PacmanAutoController(Node):
         self.declare_parameter("cmd_topic", "/cmd_vel")
         self.declare_parameter("control_hz", 10.0)
         self.declare_parameter("forward_speed", 0.28)
+        self.declare_parameter("min_forward_speed", 0.12)
         self.declare_parameter("turn_gain", 1.7)
         self.declare_parameter("ghost_avoid_gain", 1.6)
         self.declare_parameter("ghost_avoid_distance", 1.2)
@@ -38,6 +39,7 @@ class PacmanAutoController(Node):
 
         self.cmd_topic = str(self.get_parameter("cmd_topic").value)
         self.forward_speed = float(self.get_parameter("forward_speed").value)
+        self.min_forward_speed = float(self.get_parameter("min_forward_speed").value)
         self.turn_gain = float(self.get_parameter("turn_gain").value)
         self.ghost_avoid_gain = float(self.get_parameter("ghost_avoid_gain").value)
         self.ghost_avoid_distance = float(self.get_parameter("ghost_avoid_distance").value)
@@ -106,11 +108,7 @@ class PacmanAutoController(Node):
             self._log_waiting("waiting for active pellets")
             return
 
-        target = min(pellets, key=lambda pellet: distance_xy(self.robot_x, self.robot_y, pellet["x"], pellet["y"]))
-        target_bearing = angle_diff(
-            bearing_xy(self.robot_x, self.robot_y, float(target["x"]), float(target["y"])),
-            self.robot_heading,
-        )
+        target, target_bearing = self._select_target(pellets)
 
         ghost = json.loads(self.ghost_payload or "{}")
         ghost_turn = 0.0
@@ -147,9 +145,10 @@ class PacmanAutoController(Node):
         else:
             heading_scale = clamp(1.0 - 0.45 * abs(target_bearing), 0.25, 1.0)
             clearance_scale = clamp(front_distance / self.wall_slow_distance, 0.35, 1.0)
-            cmd.linear.x = clamp(self.forward_speed * heading_scale * clearance_scale, 0.0, SHARK_MAX_LINEAR_SPEED)
+            target_speed = self.forward_speed * heading_scale * clearance_scale
+            cmd.linear.x = clamp(target_speed, self.min_forward_speed, SHARK_MAX_LINEAR_SPEED)
 
-        self._log_status(target, cmd)
+        self._log_status(target, target_bearing, front_distance, left, center, right, wall_turn, ghost_turn, cmd)
         self.cmd_pub.publish(cmd)
 
     def _slice_max(self, lidar: list[float], start: int, end: int) -> float:
@@ -158,13 +157,43 @@ class PacmanAutoController(Node):
             return 0.0
         return float(max(values))
 
-    def _log_status(self, target: dict, cmd: Twist) -> None:
+    def _select_target(self, pellets: list[dict]) -> tuple[dict, float]:
+        best_target = pellets[0]
+        best_bearing = 0.0
+        best_cost = float("inf")
+        for pellet in pellets:
+            bearing = angle_diff(
+                bearing_xy(self.robot_x, self.robot_y, float(pellet["x"]), float(pellet["y"])),
+                self.robot_heading,
+            )
+            distance = distance_xy(self.robot_x, self.robot_y, float(pellet["x"]), float(pellet["y"]))
+            cost = distance + 0.8 * abs(bearing)
+            if cost < best_cost:
+                best_target = pellet
+                best_bearing = bearing
+                best_cost = cost
+        return best_target, best_bearing
+
+    def _log_status(
+        self,
+        target: dict,
+        target_bearing: float,
+        front_distance: float,
+        left: float,
+        center: float,
+        right: float,
+        wall_turn: float,
+        ghost_turn: float,
+        cmd: Twist,
+    ) -> None:
         now = self.get_clock().now()
         if (now - self.last_log_time).nanoseconds / 1e9 < 1.0:
             return
         distance = distance_xy(self.robot_x, self.robot_y, float(target["x"]), float(target["y"]))
         self.get_logger().info(
-            f"[AUTO] target={target['pellet_id']} dist={distance:.2f} v={cmd.linear.x:.2f} w={cmd.angular.z:.2f}"
+            f"[AUTO] target={target['pellet_id']} dist={distance:.2f} bearing={target_bearing:.2f} "
+            f"front={front_distance:.2f} lidar(l={left:.2f},c={center:.2f},r={right:.2f}) "
+            f"turns(wall={wall_turn:.2f},ghost={ghost_turn:.2f}) cmd(v={cmd.linear.x:.2f},w={cmd.angular.z:.2f})"
         )
         self.last_log_time = now
 
