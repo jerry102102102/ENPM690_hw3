@@ -23,16 +23,17 @@ Key design points:
 
 ## Controller Summary
 
-The autonomous controller combines:
+The autonomous controller is deterministic and follows a fixed four-stage loop:
 
-- nearest-target heading control,
-- LiDAR-based wall influence term,
-- front-clearance gating using a tunable safety distance.
+- segment LiDAR into obstacle-risk sectors and candidate pursuit direction signals,
+- select next target heading from active pellets plus LiDAR candidate signal,
+- apply obstacle-aware pursuit (target term + risk turn + front-clearance gating),
+- stop and mark completion when all pellets are collected.
 
 Control outputs:
 
-- linear velocity scales with heading alignment and obstacle clearance,
-- angular velocity follows target heading plus wall-avoidance correction.
+- linear velocity scales with pursuit-heading alignment and obstacle clearance,
+- angular velocity follows fused pursuit heading plus obstacle-risk correction.
 
 ## Parameter Comparison
 
@@ -47,7 +48,7 @@ Two tunings are compared side-by-side:
   - higher max speed,
   - faster collection tendency but greater near-obstacle risk.
 
-The generated `demo_metrics.md` captures run-level values (score, collisions, close-call frame counts) for quick reference.
+The generated `demo_metrics.md` captures run-level values (score, collisions, close-call frame counts, completion flag) for quick reference.
 
 ## Reproducibility
 

@@ -148,8 +148,8 @@ def reset_robot() -> RobotState:
     return RobotState(x=-4.2, y=0.0, heading=0.0)
 
 
-def reset_pellets() -> list[dict[str, float | bool]]:
-    return [{"x": x, "y": y, "active": True} for (x, y) in PELLET_LAYOUT]
+def reset_pellets() -> list[dict[str, float | bool | str]]:
+    return [{"pellet_id": f"pellet_{idx}", "x": x, "y": y, "active": True} for idx, (x, y) in enumerate(PELLET_LAYOUT)]
 
 
 def _circle_intersects_obstacle(x: float, y: float, radius: float, obstacle: Obstacle) -> bool:
@@ -189,7 +189,7 @@ def apply_motion(robot: RobotState, linear_cmd: float, angular_cmd: float, dt: f
         robot.trail.append((robot.x, robot.y))
 
 
-def collect_pellets(robot: RobotState, pellets: list[dict[str, float | bool]]) -> int:
+def collect_pellets(robot: RobotState, pellets: list[dict[str, float | bool | str]]) -> int:
     gained = 0
     for pellet in pellets:
         if not bool(pellet["active"]):
@@ -210,33 +210,79 @@ def lidar_scan(robot: RobotState) -> list[float]:
 
 
 def auto_controller(
-    robot: RobotState, pellets: list[dict[str, float | bool]], params: AutoParams, scan: list[float]
+    robot: RobotState, pellets: list[dict[str, float | bool | str]], params: AutoParams, scan: list[float]
 ) -> tuple[float, float, dict[str, float]]:
     active = [p for p in pellets if bool(p["active"])]
     if not active:
-        return 0.0, 0.0, {"front": LIDAR_RANGE_MAX, "left": LIDAR_RANGE_MAX, "right": LIDAR_RANGE_MAX, "error": 0.0}
+        return 0.0, 0.0, {"front": LIDAR_RANGE_MAX, "left": 0.0, "right": 0.0, "error": 0.0, "target_idx": -1, "target_id": -1}
 
-    target = min(active, key=lambda p: distance_xy(robot.x, robot.y, float(p["x"]), float(p["y"])))
+    target = min(
+        active,
+        key=lambda p: distance_xy(robot.x, robot.y, float(p["x"]), float(p["y"]))
+        + 0.8 * abs(angle_diff(bearing_xy(robot.x, robot.y, float(p["x"]), float(p["y"])), robot.heading)),
+    )
     target_bearing = bearing_xy(robot.x, robot.y, float(target["x"]), float(target["y"]))
-    heading_error = angle_diff(target_bearing, robot.heading)
+    target_error = angle_diff(target_bearing, robot.heading)
 
-    center = len(scan) // 2
-    front = min(scan[center - 1 : center + 2])
-    left = sum(scan[center + 4 : center + 8]) / 4.0
-    right = sum(scan[center - 8 : center - 4]) / 4.0
-    wall_term = params.wall_gain * ((1.0 / (right + 0.10)) - (1.0 / (left + 0.10)))
+    left_risk = 0.0
+    right_risk = 0.0
+    left_count = 0
+    right_count = 0
+    front = LIDAR_RANGE_MAX
+    best_signal = -1.0
+    best_idx = 0
+    best_heading = target_error
+    for idx, distance in enumerate(scan):
+        rel = -math.pi + (2.0 * math.pi * idx / max(1, len(scan) - 1))
+        risk = 1.0 - clamp(distance / LIDAR_RANGE_MAX, 0.0, 1.0)
+        clearance = 1.0 - risk
+        align_target = max(0.0, math.cos(angle_diff(rel, target_error)))
+        align_front = max(0.0, math.cos(rel))
+        signal = clearance * (0.70 * align_target + 0.30 * align_front)
+        if signal > best_signal:
+            best_signal = signal
+            best_idx = idx
+            best_heading = rel
+        if abs(rel) <= 0.35:
+            front = min(front, distance)
+        if 0.25 <= rel <= 1.20:
+            left_risk += risk
+            left_count += 1
+        if -1.20 <= rel <= -0.25:
+            right_risk += risk
+            right_count += 1
 
-    angular = clamp(params.heading_gain * heading_error + wall_term, -params.max_angular, params.max_angular)
+    left = left_risk / max(1, left_count)
+    right = right_risk / max(1, right_count)
+    wall_term = params.wall_gain * (right - left)
+    obstacle_mix = clamp(1.0 - (front / max(params.safety_distance + 0.8, 1e-3)), 0.0, 1.0)
+    signal_gain = 0.9 * obstacle_mix
+    pursuit_heading = angle_diff(
+        math.atan2(
+            math.sin(target_error) + signal_gain * math.sin(best_heading),
+            math.cos(target_error) + signal_gain * math.cos(best_heading),
+        ),
+        0.0,
+    )
+
+    angular = clamp(params.heading_gain * pursuit_heading + wall_term, -params.max_angular, params.max_angular)
     if front < params.safety_distance:
         linear = 0.0
-        if abs(wall_term) < 0.05:
-            angular = params.max_angular if heading_error >= 0.0 else -params.max_angular
+        angular = params.max_angular if wall_term >= 0.0 else -params.max_angular
     else:
-        align_scale = clamp(1.0 - 0.65 * abs(heading_error), 0.25, 1.0)
-        clearance_scale = clamp((front - params.safety_distance) / 2.0, 0.25, 1.0)
+        align_scale = clamp(1.0 - 0.55 * abs(pursuit_heading), 0.20, 1.0)
+        clearance_scale = clamp((front - params.safety_distance) / 2.0, 0.20, 1.0)
         linear = params.max_linear * align_scale * clearance_scale
 
-    diagnostics = {"front": front, "left": left, "right": right, "error": heading_error}
+    target_id = int(str(target["pellet_id"]).split("_")[-1])
+    diagnostics = {
+        "front": front,
+        "left": left,
+        "right": right,
+        "error": pursuit_heading,
+        "target_idx": float(best_idx),
+        "target_id": float(target_id),
+    }
     return linear, angular, diagnostics
 
 
@@ -334,7 +380,7 @@ def draw_map(
     frame: np.ndarray,
     view: MapView,
     robot: RobotState,
-    pellets: list[dict[str, float | bool]],
+    pellets: list[dict[str, float | bool | str]],
     scan: list[float],
     robot_color: np.ndarray,
     title: str,
@@ -429,7 +475,7 @@ def run(output_dir: Path, fps: int) -> None:
     teleop_log_path = output_dir / "teleop_input_log.txt"
 
     seg1_frames = fps * 12
-    seg2_frames = fps * 14
+    seg2_frames = fps * 50
     seg3_frames = fps * 14
     total_frames = seg1_frames + seg2_frames + seg3_frames
 
@@ -442,7 +488,7 @@ def run(output_dir: Path, fps: int) -> None:
     robot_g = reset_robot()
     pellets_g = reset_pellets()
 
-    baseline = AutoParams("BASE", max_linear=1.0, max_angular=1.8, safety_distance=0.75, heading_gain=1.35, wall_gain=0.55)
+    baseline = AutoParams("BASE", max_linear=1.2, max_angular=1.8, safety_distance=0.75, heading_gain=1.35, wall_gain=0.55)
     cautious = AutoParams("CAUT", max_linear=0.75, max_angular=1.6, safety_distance=1.05, heading_gain=1.00, wall_gain=0.80)
     aggressive = AutoParams("AGGR", max_linear=1.20, max_angular=2.2, safety_distance=0.45, heading_gain=1.55, wall_gain=0.35)
 
@@ -530,6 +576,9 @@ def run(output_dir: Path, fps: int) -> None:
                     [
                         f"TIME {t:04.1f}",
                         f"SCORE {robot_a.score}",
+                        f"TARGET P{int(diag['target_id']) if diag['target_id'] >= 0 else '-'}",
+                        f"COLLECTED {robot_a.score}",
+                        f"REMAIN {sum(1 for p in pellets_a if bool(p['active']))}",
                         f"COL {robot_a.collisions}",
                         f"FRONT {diag['front']:.2f}",
                         f"SAFE {baseline.safety_distance:.2f}",
@@ -551,6 +600,8 @@ def run(output_dir: Path, fps: int) -> None:
                 safe_y = by - int((baseline.safety_distance / LIDAR_RANGE_MAX) * max_h)
                 draw_line(frame, bx - 4, safe_y, bx + (bw + gap) * LIDAR_BEAMS + 2, safe_y, DANGER, thickness=2)
                 draw_text(frame, panel_x + 12, 642, "RED LINE = SAFETY", TXT, scale=1)
+                if sum(1 for p in pellets_a if bool(p["active"])) == 0:
+                    draw_text(frame, panel_x + 12, 622, "COMPLETE ALL PELLETS", SAFE, scale=2)
 
             else:
                 t = (i - seg1_frames - seg2_frames) / fps
@@ -583,6 +634,9 @@ def run(output_dir: Path, fps: int) -> None:
                     [
                         f"TIME {t:04.1f}",
                         f"SCORE {robot_c.score}",
+                        f"TARGET P{int(diag_c['target_id']) if diag_c['target_id'] >= 0 else '-'}",
+                        f"COLLECTED {robot_c.score}",
+                        f"REMAIN {sum(1 for p in pellets_c if bool(p['active']))}",
                         f"COL {robot_c.collisions}",
                         f"SAFE {cautious.safety_distance:.2f}",
                         f"MAXV {cautious.max_linear:.2f}",
@@ -599,6 +653,9 @@ def run(output_dir: Path, fps: int) -> None:
                     [
                         f"TIME {t:04.1f}",
                         f"SCORE {robot_g.score}",
+                        f"TARGET P{int(diag_g['target_id']) if diag_g['target_id'] >= 0 else '-'}",
+                        f"COLLECTED {robot_g.score}",
+                        f"REMAIN {sum(1 for p in pellets_g if bool(p['active']))}",
                         f"COL {robot_g.collisions}",
                         f"SAFE {aggressive.safety_distance:.2f}",
                         f"MAXV {aggressive.max_linear:.2f}",
@@ -620,6 +677,7 @@ def run(output_dir: Path, fps: int) -> None:
             "auto_score": float(robot_a.score),
             "auto_collisions": float(robot_a.collisions),
             "auto_pellets_remaining": float(sum(1 for p in pellets_a if bool(p["active"]))),
+            "auto_completion_flag": float(1.0 if sum(1 for p in pellets_a if bool(p["active"])) == 0 else 0.0),
             "compare_cautious_score": float(robot_c.score),
             "compare_cautious_collisions": float(robot_c.collisions),
             "compare_aggressive_score": float(robot_g.score),

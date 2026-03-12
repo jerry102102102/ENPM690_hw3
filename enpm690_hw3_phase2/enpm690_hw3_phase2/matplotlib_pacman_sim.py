@@ -38,6 +38,7 @@ class MatplotlibPacmanSim:
         self.ghost_manager = GhostManager()
         self.keys_down: set[str] = set()
         self.last_update_time = time.perf_counter()
+        self.current_target_id = ""
 
         self.pellet_manager.reset()
         self.ghost_manager.reset()
@@ -112,6 +113,7 @@ class MatplotlibPacmanSim:
         self.score = 0
         self.game_over = False
         self.victory = False
+        self.current_target_id = ""
         self.last_update_time = time.perf_counter()
 
     def run(self) -> None:
@@ -175,6 +177,7 @@ class MatplotlibPacmanSim:
         if not pellets:
             self.pacman.linear_speed = 0.0
             self.pacman.angular_speed = 0.0
+            self.current_target_id = ""
             return
 
         target = min(
@@ -182,41 +185,88 @@ class MatplotlibPacmanSim:
             key=lambda pellet: distance_xy(self.pacman.x, self.pacman.y, pellet.x, pellet.y)
             + 0.8 * abs(angle_diff(bearing_xy(self.pacman.x, self.pacman.y, pellet.x, pellet.y), self.pacman.heading)),
         )
+        self.current_target_id = target.pellet_id
         target_bearing = angle_diff(bearing_xy(self.pacman.x, self.pacman.y, target.x, target.y), self.pacman.heading)
+        scan = self._scan_ranges(31, 4.0)
+        obstacle_turn, target_signal_heading, front_clearance = self._segment_and_select_heading(scan, target_bearing, 4.0)
 
-        left = self._ray_distance(self.pacman.heading + 0.55)
-        center = self._ray_distance(self.pacman.heading)
-        right = self._ray_distance(self.pacman.heading - 0.55)
-        wall_turn = 0.75 * ((1.0 / max(right, 0.2)) - (1.0 / max(left, 0.2)))
+        obstacle_mix = clamp(1.0 - (front_clearance / 1.0), 0.0, 1.0)
+        signal_gain = 0.9 * obstacle_mix
+        pursuit_heading = angle_diff(
+            math.atan2(
+                math.sin(target_bearing) + signal_gain * math.sin(target_signal_heading),
+                math.cos(target_bearing) + signal_gain * math.cos(target_signal_heading),
+            ),
+            0.0,
+        )
+        wall_turn = 1.1 * obstacle_turn
 
         ghost = self.ghost_manager.ghost
         ghost_distance = distance_xy(self.pacman.x, self.pacman.y, ghost.x, ghost.y)
         ghost_turn = 0.0
-        if ghost_distance < 1.6:
+        if ghost_distance < 1.4:
             ghost_bearing = angle_diff(bearing_xy(self.pacman.x, self.pacman.y, ghost.x, ghost.y), self.pacman.heading)
-            ghost_turn = -1.2 * ghost_bearing
+            ghost_turn = -1.5 * ghost_bearing
 
-        angular = clamp(1.7 * target_bearing + wall_turn + ghost_turn, -2.2, 2.2)
-        if center < 0.45:
+        angular = clamp(1.7 * pursuit_heading + wall_turn + ghost_turn, -2.2, 2.2)
+        if front_clearance < 0.42:
             linear = 0.0
             angular = 2.0 if wall_turn >= 0.0 else -2.0
         else:
-            heading_scale = clamp(1.0 - 0.45 * abs(target_bearing), 0.25, 1.0)
-            clearance_scale = clamp(center / 1.2, 0.35, 1.0)
-            linear = clamp(0.85 * heading_scale * clearance_scale, 0.15, 1.0)
+            heading_scale = clamp(1.0 - 0.45 * abs(pursuit_heading), 0.20, 1.0)
+            clearance_scale = clamp(front_clearance / 1.0, 0.20, 1.0)
+            linear = clamp(0.9 * heading_scale * clearance_scale, 0.16, 1.0)
 
         self.pacman.linear_speed = linear
         self.pacman.angular_speed = angular
 
-    def _ray_distance(self, angle: float) -> float:
+    def _scan_ranges(self, beams: int, range_max: float) -> list[float]:
+        distances: list[float] = []
+        for idx in range(beams):
+            rel = -math.pi + (2.0 * math.pi * idx / max(1, beams - 1))
+            distances.append(self._ray_distance(self.pacman.heading + rel, range_max=range_max))
+        return distances
+
+    def _ray_distance(self, angle: float, range_max: float = 4.0) -> float:
         return raycast_world(
             self.pacman.x,
             self.pacman.y,
             angle,
-            range_max=4.0,
+            range_max=range_max,
             bounds=PACMAN_WORLD_BOUNDS,
             obstacles=(),
         )
+
+    def _segment_and_select_heading(self, scan: list[float], target_bearing: float, range_max: float) -> tuple[float, float, float]:
+        left_risk = 0.0
+        right_risk = 0.0
+        left_count = 0
+        right_count = 0
+        front_clearance = range_max
+        best_score = -1.0
+        best_heading = target_bearing
+
+        for idx, distance in enumerate(scan):
+            rel = -math.pi + (2.0 * math.pi * idx / max(1, len(scan) - 1))
+            risk = 1.0 - clamp(distance / range_max, 0.0, 1.0)
+            clearance = 1.0 - risk
+            alignment = max(0.0, math.cos(angle_diff(rel, target_bearing)))
+            forward = max(0.0, math.cos(rel))
+            signal = clearance * (0.7 * alignment + 0.3 * forward)
+            if signal > best_score:
+                best_score = signal
+                best_heading = rel
+            if abs(rel) <= 0.35:
+                front_clearance = min(front_clearance, distance)
+            if 0.25 <= rel <= 1.20:
+                left_risk += risk
+                left_count += 1
+            if -1.20 <= rel <= -0.25:
+                right_risk += risk
+                right_count += 1
+
+        obstacle_turn = (right_risk / max(1, right_count)) - (left_risk / max(1, left_count))
+        return obstacle_turn, best_heading, front_clearance
 
     def _render(self) -> None:
         active = self.pellet_manager.active_pellets()
@@ -237,7 +287,9 @@ class MatplotlibPacmanSim:
             f"mode={self.mode}",
             f"score={self.score}",
             f"time={self.time_remaining:.1f}s",
-            f"pellets={self.pellet_manager.active_count()}",
+            f"target={self.current_target_id or '-'}",
+            f"collected={len(self.pellet_manager.pellets) - self.pellet_manager.active_count()}",
+            f"remaining={self.pellet_manager.active_count()}",
             "controls=WASD / arrows, R reset" if self.mode == "teleop" else "auto controller active",
         ]
         if self.victory:

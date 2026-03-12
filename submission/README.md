@@ -18,8 +18,9 @@ This submission uses a deterministic lightweight simulation pipeline (no Gazebo 
 - The robot trajectory, simulated LiDAR beams, and environment feedback are visualized.
 
 2. **Autonomous behavior with sensor display**
-- A baseline obstacle-avoidance and target-seeking controller runs autonomously.
+- A deterministic LiDAR-segmentation controller runs autonomously to clear pellets.
 - LiDAR bins are shown in real time with a marked safety-distance threshold.
+- Overlay shows current target plus collected/remaining counts.
 
 3. **Tunable parameter impact comparison**
 - Two autonomous tunings run side-by-side:

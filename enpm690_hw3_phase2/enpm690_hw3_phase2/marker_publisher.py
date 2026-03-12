@@ -21,11 +21,13 @@ class MarkerPublisher(Node):
         self.pellet_payload = "[]"
         self.ghost_payload = "{}"
         self.game_payload = "{}"
+        self.auto_payload = "{}"
 
         self.marker_pub = self.create_publisher(MarkerArray, self.marker_topic, 10)
         self.create_subscription(String, "/phase2/pellet_state_json", self._pellet_callback, 10)
         self.create_subscription(String, "/phase2/ghost_state_json", self._ghost_callback, 10)
         self.create_subscription(String, "/phase2/game_state_json", self._game_callback, 10)
+        self.create_subscription(String, "/phase2/auto_status_json", self._auto_callback, 10)
         self.create_timer(0.1, self._tick)
 
     def _pellet_callback(self, msg: String) -> None:
@@ -37,10 +39,14 @@ class MarkerPublisher(Node):
     def _game_callback(self, msg: String) -> None:
         self.game_payload = msg.data
 
+    def _auto_callback(self, msg: String) -> None:
+        self.auto_payload = msg.data
+
     def _tick(self) -> None:
         pellets = json.loads(self.pellet_payload or "[]")
         ghost = json.loads(self.ghost_payload or "{}")
         game = json.loads(self.game_payload or "{}")
+        auto = json.loads(self.auto_payload or "{}")
         markers = MarkerArray()
         stamp = self.get_clock().now().to_msg()
 
@@ -88,10 +94,12 @@ class MarkerPublisher(Node):
         hud_lines = [
             f"score={game.get('score', 0)}",
             f"time={game.get('time_remaining', 0.0):.1f}s",
-            f"pellets={game.get('pellets_remaining', 0)}",
+            f"target={auto.get('target_id', '-')}",
+            f"collected={auto.get('collected', 0)}",
+            f"remaining={auto.get('remaining', game.get('pellets_remaining', 0))}",
             f"mode={game.get('mode', '')}",
         ]
-        if game.get("victory", False):
+        if auto.get("complete", False) or game.get("victory", False):
             hud_lines.append("VICTORY")
         elif game.get("game_over", False):
             hud_lines.append("GAME OVER")

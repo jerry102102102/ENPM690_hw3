@@ -45,9 +45,9 @@ ros2 run enpm690_hw3_phase2 pacman_matplotlib_sim -- --mode auto
 
 The auto mode uses:
 
-- nearest-pellet target selection
-- simple simulated LiDAR ray distances to walls
-- a simple ghost avoidance term
+- deterministic LiDAR segmentation into obstacle risk + candidate pursuit direction
+- deterministic next-target heading selection over active pellets
+- obstacle-aware pursuit with ghost avoidance
 
 ## Rules
 
