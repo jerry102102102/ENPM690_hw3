@@ -1,0 +1,17 @@
+[project]
+name = "enpm690-hw3"
+version = "0.1.0"
+description = "Deterministic ENPM690 HW3 demo artifact generator"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.26,<3",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "code"}
+packages = ["enpm690_hw3_phase2"]
