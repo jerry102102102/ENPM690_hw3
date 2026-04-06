@@ -18,6 +18,31 @@ It contains the exact instructor-facing materials needed to review and regenerat
 - Python dependencies are managed with `uv`.
 - `ffmpeg` must be installed and available on `PATH`.
 
+## Install prerequisites
+
+### 1. Install `uv`
+
+If `uv` is not installed yet, run:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+### 2. Install `ffmpeg`
+
+On Ubuntu / Debian:
+
+```bash
+sudo apt update
+sudo apt install -y ffmpeg
+```
+
+After installation, verify it is available:
+
+```bash
+ffmpeg -version
+```
+
 ## Regenerate the demo
 
 From the repository root:
